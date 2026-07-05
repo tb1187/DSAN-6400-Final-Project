@@ -1,0 +1,8 @@
+# Project configuration
+# TODO: fill in as the pipeline is built.
+
+paths:
+  raw_data: data/raw
+  processed_data: data/processed
+  sources: sources
+  results: results

@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment / secrets
+.env
+*.local
+
+# Data (keep folder structure via .gitkeep, ignore contents)
+data/raw/*
+data/processed/*
+data/external/*
+!data/**/.gitkeep
+
+# Results (keep folders, ignore generated artifacts)
+results/*
+!results/.gitkeep
+!results/figures/
+results/figures/*
+!results/figures/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
