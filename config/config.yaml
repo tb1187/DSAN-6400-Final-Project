@@ -6,3 +6,10 @@ paths:
   processed_data: data/processed
   sources: sources
   results: results
+
+retrieval:
+  embedding_model: BAAI/bge-small-en-v1.5
+  index_path: data/processed/chunk_index.faiss
+  index_ids_path: data/processed/chunk_index_ids.parquet
+  top_k: 8
+  anthropic_model: claude-sonnet-5
