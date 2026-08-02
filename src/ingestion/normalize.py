@@ -28,7 +28,7 @@ import re
 from bisect import bisect_right
 from dataclasses import dataclass, field
 
-from .email_headers import HEADER_RE
+from .email_headers import parse_headers
 from .textstats import BATES_STAMP_RE, REDACTION_RE
 
 REDACTION_SENTINEL = "[REDACTED]"
@@ -52,9 +52,6 @@ MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
 MULTI_BLANK_RE = re.compile(r"\n{3,}")
 
 BATES_NUMBER_RE = re.compile(r"(\d{4,})")
-
-# Header lines separated by less than this many characters belong to one block.
-HEADER_GAP = 200
 
 
 def _canonical_bates(stamp: str) -> str:
@@ -257,14 +254,18 @@ def _collect_edits(raw: str) -> list[Edit]:
 
 
 def _find_header_spans(text: str) -> list[tuple[int, int]]:
-    """Group runs of email header lines into blocks."""
-    spans: list[tuple[int, int]] = []
-    for match in HEADER_RE.finditer(text):
-        if spans and match.start() - spans[-1][1] < HEADER_GAP:
-            spans[-1] = (spans[-1][0], match.end())
-        else:
-            spans.append((match.start(), match.end()))
-    return spans
+    """Char spans of real, populated email messages.
+
+    Delegates to :func:`~.email_headers.parse_headers`, which already knows a
+    ``From:`` line following a filled-in one — or a large enough gap — starts a
+    new message, and drops matches that never accumulate a sender, recipient,
+    or subject. A blind proximity merge here would otherwise glue an entire
+    terse reply chain into one giant header span: short replies ("Ha",
+    "Florida") are common on this corpus and easily sit within any fixed
+    character gap of the next message's header lines, and a lone ``Attachments:``
+    line pointing at an unrelated URL can pass as a "header" on its own.
+    """
+    return [(m.char_start, m.char_end) for m in parse_headers("_header_scan", text)]
 
 
 def normalise(doc_id: str, raw: str) -> NormalisedDoc:

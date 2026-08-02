@@ -6,27 +6,24 @@ page citation.
 
 Three rules are specific to this production:
 
-1. **Email header blocks are atomic and lead their message.** A ``From:/Sent:/To:``
-   block is never split, and it starts a new chunk rather than trailing at the end
-   of the previous one — so the first body chunk of a message carries its own
-   header. That is what lets a name in the body be attributed to the right
-   conversation, and what makes a retrieved chunk interpretable on its own. A long
-   message that spills into further chunks would otherwise leave those chunks
-   headerless, so its header is also copied onto the front of every later chunk
-   of that same message (not counted toward that chunk's own char span, since the
-   text is a repeat — only its own body content is real, citable source text).
+1. **Header text is metadata, not body content.** An email's ``From:/Sent:/To:``
+   block is stripped out before body text is divided into chunks — it is never
+   itself a chunk, and it is never packed together with body words toward the
+   word-count target. Instead, the header belonging to a chunk's message is
+   prepended onto every one of that message's body chunks (all of them, not
+   just the first), so a chunk retrieved in isolation always says who wrote it.
+   The one exception is a message with no body at all (a bare forwarded header,
+   say) — that gets emitted as a chunk of just the header, so it still gets a
+   citation instead of vanishing from the corpus.
 2. **Paragraphs first, sentences only as a fallback.** The scanned material is
    already fragmented; slicing mid-sentence at a fixed word count makes it worse.
-3. **Overlap is a span, not a copy.** Each chunk begins a fixed number of words
-   before the previous one ended, so chunks stay single contiguous spans and the
-   offset bookkeeping stays trivial.
-4. **Overlap never bridges two unrelated messages.** Rule 1 guarantees a header
-   opens its own chunk, but the overlap in rule 3 would otherwise still pull the
-   previous message's trailing words into it — splicing two different senders'
-   text together just because they happen to be adjacent in the document. That
-   bleed is only kept when the new header's ``Subject:`` (stripped of
-   ``Re:``/``Fwd:`` prefixes) matches the previous message's, i.e. they are
-   actually the same thread. Otherwise the new chunk starts exactly at the header.
+3. **A body chunk never crosses a message boundary, and overlap never bridges
+   two unrelated messages.** Body text is packed toward the ~350-word target,
+   but packing always breaks at a header boundary regardless of word count, so
+   one chunk's body is never a splice of two different senders' text. The
+   ~60-word overlap carried across that break is only kept when the new
+   message's ``Subject:`` (stripped of ``Re:``/``Fwd:`` prefixes) matches the
+   previous message's — i.e. they are actually the same thread.
 """
 
 from __future__ import annotations
@@ -58,7 +55,7 @@ class Chunk:
     page_bates_start: str | None
     page_bates_end: str | None
     page_is_exact: bool
-    is_header: bool
+    has_header: bool
     n_words: int
     text: str
 
@@ -69,12 +66,11 @@ class Chunk:
 
 @dataclass(frozen=True)
 class _Unit:
-    """A block of text that is never split across chunks."""
+    """A block of body text that is never split across chunks."""
 
     start: int
     end: int
     n_words: int
-    is_header: bool
 
 
 def _count_words(text: str) -> int:
@@ -94,69 +90,62 @@ def _paragraph_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _merge_header_spans(
+def _strip_header_spans(
     spans: list[tuple[int, int]], header_spans: list[tuple[int, int]]
 ) -> list[tuple[int, int]]:
-    """Merge paragraph spans that a single header block straddles.
+    """Remove any portion of ``spans`` that overlaps a header block.
 
-    Header lines are usually contiguous, but a blank line inside the block would
-    otherwise let the paragraph splitter cut it in half.
+    Headers are metadata, not body content — see rule 1 — so they never
+    become part of a body unit in the first place, rather than being
+    protected from splitting the way body text is.
     """
     if not header_spans:
-        return spans
+        return list(spans)
 
-    merged: list[tuple[int, int]] = []
+    stripped: list[tuple[int, int]] = []
     for start, end in spans:
-        if merged:
-            prev_start, prev_end = merged[-1]
-            straddles = any(hs < end and prev_start < he for hs, he in header_spans)
-            if straddles and any(hs < prev_end and start < he for hs, he in header_spans):
-                merged[-1] = (prev_start, end)
+        cursor = start
+        for hs, he in header_spans:
+            if he <= cursor:
                 continue
-        merged.append((start, end))
-    return merged
+            if hs >= end:
+                break
+            if hs > cursor:
+                stripped.append((cursor, hs))
+            cursor = max(cursor, he)
+        if cursor < end:
+            stripped.append((cursor, end))
+    return stripped
 
 
-def _hard_split(nd: NormalisedDoc, start: int, end: int, target: int) -> list[_Unit]:
+def _hard_split(text: str, start: int, end: int, target: int) -> list[_Unit]:
     """Last-resort split at word boundaries.
 
     Sentence splitting needs punctuation followed by a capital, which a lot of
     this corpus does not have — plenty of the email bodies are written entirely
     in lower case. Without this fallback such a document becomes one enormous
-    chunk. Boundaries inside a header block are still avoided.
+    chunk.
     """
-    positions = [m.start() for m in WORD_RE.finditer(nd.text, start, end)]
+    positions = [m.start() for m in WORD_RE.finditer(text, start, end)]
     if len(positions) <= target:
-        return [_Unit(start, end, len(positions), nd.in_header(start, end))]
+        return [_Unit(start, end, len(positions))]
 
     units: list[_Unit] = []
     unit_start = start
     for i in range(target, len(positions), target):
         cut = positions[i]
-        if any(hs < cut < he for hs, he in nd.header_spans):
-            continue
-        units.append(_Unit(unit_start, cut, target, nd.in_header(unit_start, cut)))
+        units.append(_Unit(unit_start, cut, target))
         unit_start = cut
     if end > unit_start:
-        units.append(
-            _Unit(unit_start, end, _count_words(nd.text[unit_start:end]), nd.in_header(unit_start, end))
-        )
+        units.append(_Unit(unit_start, end, _count_words(text[unit_start:end])))
     return units
 
 
-def _sentence_units(nd: NormalisedDoc, start: int, end: int, target: int) -> list[_Unit]:
-    """Break an oversized block into sentence-aligned units under ``target`` words.
-
-    Candidate boundaries that fall *inside* an email header block are dropped, so
-    a header is never cut in half — but a long block that merely contains one is
-    still split, rather than being exempted wholesale.
-    """
-    text = nd.text
+def _sentence_units(text: str, start: int, end: int, target: int) -> list[_Unit]:
+    """Break an oversized block into sentence-aligned units under ``target`` words."""
     boundaries = {start, end}
     for match in SENTENCE_END_RE.finditer(text, start, end):
-        pos = match.end()
-        if not any(hs < pos < he for hs, he in nd.header_spans):
-            boundaries.add(pos)
+        boundaries.add(match.end())
     ordered = sorted(b for b in boundaries if start <= b <= end)
 
     units: list[_Unit] = []
@@ -165,32 +154,32 @@ def _sentence_units(nd: NormalisedDoc, start: int, end: int, target: int) -> lis
     for left, right in zip(ordered, ordered[1:]):
         sentence_words = _count_words(text[left:right])
         if words and words + sentence_words > target:
-            units.append(_Unit(unit_start, left, words, nd.in_header(unit_start, left)))
+            units.append(_Unit(unit_start, left, words))
             unit_start = left
             words = 0
         words += sentence_words
     if end > unit_start:
-        units.append(_Unit(unit_start, end, words, nd.in_header(unit_start, end)))
+        units.append(_Unit(unit_start, end, words))
 
     # A single "sentence" can still blow past the target — fall back to words.
     bounded: list[_Unit] = []
     for unit in units:
         if unit.n_words > target:
-            bounded.extend(_hard_split(nd, unit.start, unit.end, target))
+            bounded.extend(_hard_split(text, unit.start, unit.end, target))
         else:
             bounded.append(unit)
     return bounded
 
 
 def _build_units(nd: NormalisedDoc, target: int) -> list[_Unit]:
-    spans = _merge_header_spans(_paragraph_spans(nd.text), nd.header_spans)
+    body_spans = _strip_header_spans(_paragraph_spans(nd.text), nd.header_spans)
     units: list[_Unit] = []
-    for start, end in spans:
+    for start, end in body_spans:
         n_words = _count_words(nd.text[start:end])
         if n_words > target:
-            units.extend(_sentence_units(nd, start, end, target))
+            units.extend(_sentence_units(nd.text, start, end, target))
         else:
-            units.append(_Unit(start, end, n_words, nd.in_header(start, end)))
+            units.append(_Unit(start, end, n_words))
     return units
 
 
@@ -205,23 +194,38 @@ def _header_subject(text: str, start: int, end: int) -> str | None:
         return None
     value = match.group("value").strip()
     while True:
-        stripped = SUBJECT_PREFIX_RE.sub("", value)
-        if stripped == value:
+        rest = SUBJECT_PREFIX_RE.sub("", value)
+        if rest == value:
             break
-        value = stripped
+        value = rest
     value = value.strip().lower()
     return value or None
 
 
-def _governing_header(header_spans: list[tuple[int, int]], pos: int) -> tuple[int, int] | None:
-    """The most recent header block ending at or before ``pos``, if any."""
-    governing = None
-    for hs, he in header_spans:
+def _governing_header(header_spans: list[tuple[int, int]], pos: int) -> int:
+    """Index into ``header_spans`` of the message that owns position ``pos``.
+
+    That is the last header block ending at or before ``pos`` — ``-1`` if no
+    header precedes it (body text can appear before any header, in a document
+    that isn't an email, or in the doc's preamble before the first message).
+    """
+    idx = -1
+    for i, (_, he) in enumerate(header_spans):
         if he <= pos:
-            governing = (hs, he)
+            idx = i
         else:
             break
-    return governing
+    return idx
+
+
+def _same_thread(nd: NormalisedDoc, prev_idx: int, next_idx: int) -> bool:
+    if prev_idx < 0 or next_idx < 0:
+        return False
+    prev_hs, prev_he = nd.header_spans[prev_idx]
+    next_hs, next_he = nd.header_spans[next_idx]
+    prev_subject = _header_subject(nd.text, prev_hs, prev_he)
+    next_subject = _header_subject(nd.text, next_hs, next_he)
+    return prev_subject is not None and prev_subject == next_subject
 
 
 def _overlap_start(text: str, end: int, overlap: int, floor: int) -> int:
@@ -234,57 +238,87 @@ def _overlap_start(text: str, end: int, overlap: int, floor: int) -> int:
     return positions[-overlap]
 
 
-def chunk_document(
-    nd: NormalisedDoc,
-    target: int = TARGET_WORDS,
-    overlap: int = OVERLAP_WORDS,
-) -> list[Chunk]:
-    """Pack a normalised document into overlapping chunks."""
-    units = _build_units(nd, target)
-    if not units:
-        return []
+@dataclass(frozen=True)
+class _SpanMeta:
+    start: int
+    end: int
+    # Overlap text carried across a same-thread message boundary. It is real
+    # text from the *previous* message, so it is spliced into ``text`` as an
+    # extra piece rather than by extending this span's own char range — doing
+    # that used to make the contiguous range silently swallow the header sitting
+    # between the two messages.
+    carry: tuple[int, int] | None = None
 
-    spans: list[tuple[int, int]] = []
+
+def _pack_body_spans(nd: NormalisedDoc, units: list[_Unit], target: int, overlap: int) -> list[_SpanMeta]:
+    spans: list[_SpanMeta] = []
     cur_start: int | None = None
     cur_end = 0
     cur_words = 0
-    last_subject: str | None = None
+    cur_header = -2  # sentinel: "no chunk open yet"
+    pending_carry: tuple[int, int] | None = None
 
     for unit in units:
-        # A header block always starts a chunk so it leads its own message.
-        must_break = cur_words and (
-            unit.is_header or cur_words + unit.n_words > target
+        header = _governing_header(nd.header_spans, unit.start)
+        crosses_message = cur_start is not None and header != cur_header
+        must_break = cur_start is not None and (
+            crosses_message or cur_words + unit.n_words > target
         )
-        subject = _header_subject(nd.text, unit.start, unit.end) if unit.is_header else None
         if must_break:
-            spans.append((cur_start, cur_end))
-            # Overlap would otherwise splice the previous message's tail onto an
-            # unrelated header — only keep it within the same thread.
-            same_thread = subject is not None and subject == last_subject
-            if unit.is_header and not same_thread:
+            spans.append(_SpanMeta(cur_start, cur_end, pending_carry))
+            pending_carry = None
+            if crosses_message:
+                if _same_thread(nd, cur_header, header):
+                    back = _overlap_start(nd.text, cur_end, overlap, spans[-1].start + 1)
+                    pending_carry = (back, cur_end)
                 cur_start = unit.start
             else:
                 back = _overlap_start(nd.text, cur_end, overlap, cur_start + 1)
                 cur_start = min(back, unit.start)
             cur_words = _count_words(nd.text[cur_start : unit.start])
-        if subject is not None:
-            last_subject = subject
+        cur_header = header
         if cur_start is None:
             cur_start = unit.start
         cur_end = unit.end
         cur_words += unit.n_words
 
     if cur_start is not None and cur_end > cur_start:
-        spans.append((cur_start, cur_end))
+        spans.append(_SpanMeta(cur_start, cur_end, pending_carry))
+    return spans
+
+
+def chunk_document(
+    nd: NormalisedDoc,
+    target: int = TARGET_WORDS,
+    overlap: int = OVERLAP_WORDS,
+) -> list[Chunk]:
+    """Pack a normalised document's body text into overlapping chunks."""
+    units = _build_units(nd, target)
+    spans = _pack_body_spans(nd, units, target, overlap)
+
+    # A message with no body at all still needs a citable chunk of its own.
+    covered = {_governing_header(nd.header_spans, s.start) for s in spans}
+    for i, (hs, he) in enumerate(nd.header_spans):
+        if i not in covered:
+            spans.append(_SpanMeta(hs, he))
+    spans.sort(key=lambda s: s.start)
 
     chunks: list[Chunk] = []
-    for i, (start, end) in enumerate(spans):
-        text = nd.text[start:end]
-        is_header = nd.in_header(start, end)
-        if not is_header:
-            governing = _governing_header(nd.header_spans, start)
-            if governing is not None:
-                text = nd.text[governing[0] : governing[1]] + "\n\n" + text
+    for i, span in enumerate(spans):
+        start, end = span.start, span.end
+        header_idx = _governing_header(nd.header_spans, start)
+        is_bare_header = header_idx >= 0 and nd.header_spans[header_idx] == (start, end)
+
+        body_words = _count_words(nd.text[start:end])
+        pieces: list[str] = []
+        if span.carry is not None:
+            pieces.append(nd.text[span.carry[0] : span.carry[1]])
+        if not is_bare_header and header_idx >= 0:
+            hs, he = nd.header_spans[header_idx]
+            pieces.append(nd.text[hs:he])
+        pieces.append(nd.text[start:end])
+        text = "\n\n".join(pieces)
+
         page_start, page_end = nd.page_range(start, end)
         chunks.append(
             Chunk(
@@ -297,8 +331,8 @@ def chunk_document(
                 page_bates_start=page_start,
                 page_bates_end=page_end,
                 page_is_exact=nd.has_pages,
-                is_header=is_header,
-                n_words=_count_words(text),
+                has_header=header_idx >= 0,
+                n_words=body_words,
                 text=text,
             )
         )
