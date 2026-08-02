@@ -10,12 +10,23 @@ Three rules are specific to this production:
    block is never split, and it starts a new chunk rather than trailing at the end
    of the previous one — so the first body chunk of a message carries its own
    header. That is what lets a name in the body be attributed to the right
-   conversation, and what makes a retrieved chunk interpretable on its own.
+   conversation, and what makes a retrieved chunk interpretable on its own. A long
+   message that spills into further chunks would otherwise leave those chunks
+   headerless, so its header is also copied onto the front of every later chunk
+   of that same message (not counted toward that chunk's own char span, since the
+   text is a repeat — only its own body content is real, citable source text).
 2. **Paragraphs first, sentences only as a fallback.** The scanned material is
    already fragmented; slicing mid-sentence at a fixed word count makes it worse.
 3. **Overlap is a span, not a copy.** Each chunk begins a fixed number of words
    before the previous one ended, so chunks stay single contiguous spans and the
    offset bookkeeping stays trivial.
+4. **Overlap never bridges two unrelated messages.** Rule 1 guarantees a header
+   opens its own chunk, but the overlap in rule 3 would otherwise still pull the
+   previous message's trailing words into it — splicing two different senders'
+   text together just because they happen to be adjacent in the document. That
+   bleed is only kept when the new header's ``Subject:`` (stripped of
+   ``Re:``/``Fwd:`` prefixes) matches the previous message's, i.e. they are
+   actually the same thread. Otherwise the new chunk starts exactly at the header.
 """
 
 from __future__ import annotations
@@ -31,6 +42,9 @@ OVERLAP_WORDS = 60
 PARAGRAPH_RE = re.compile(r"\n[ \t]*\n")
 WORD_RE = re.compile(r"\S+")
 SENTENCE_END_RE = re.compile(r"(?<=[.!?])[ \t]+(?=[A-Z\"'(])|\n")
+
+SUBJECT_RE = re.compile(r"(?im)^[ \t]*Subject[ \t]*:[ \t]*(?P<value>.*)$")
+SUBJECT_PREFIX_RE = re.compile(r"(?i)^(re|fw|fwd)\s*:\s*")
 
 
 @dataclass(frozen=True)
@@ -180,6 +194,36 @@ def _build_units(nd: NormalisedDoc, target: int) -> list[_Unit]:
     return units
 
 
+def _header_subject(text: str, start: int, end: int) -> str | None:
+    """Normalised ``Subject:`` line within a header span, or ``None`` if absent.
+
+    ``Re:``/``Fwd:``/``Fw:`` prefixes are stripped (repeatedly, for chains like
+    ``Re: Fwd: Re:``) so replies and forwards of the same thread compare equal.
+    """
+    match = SUBJECT_RE.search(text, start, end)
+    if not match:
+        return None
+    value = match.group("value").strip()
+    while True:
+        stripped = SUBJECT_PREFIX_RE.sub("", value)
+        if stripped == value:
+            break
+        value = stripped
+    value = value.strip().lower()
+    return value or None
+
+
+def _governing_header(header_spans: list[tuple[int, int]], pos: int) -> tuple[int, int] | None:
+    """The most recent header block ending at or before ``pos``, if any."""
+    governing = None
+    for hs, he in header_spans:
+        if he <= pos:
+            governing = (hs, he)
+        else:
+            break
+    return governing
+
+
 def _overlap_start(text: str, end: int, overlap: int, floor: int) -> int:
     """Character offset ``overlap`` words back from ``end``, never below ``floor``."""
     if overlap <= 0:
@@ -204,17 +248,27 @@ def chunk_document(
     cur_start: int | None = None
     cur_end = 0
     cur_words = 0
+    last_subject: str | None = None
 
     for unit in units:
         # A header block always starts a chunk so it leads its own message.
         must_break = cur_words and (
             unit.is_header or cur_words + unit.n_words > target
         )
+        subject = _header_subject(nd.text, unit.start, unit.end) if unit.is_header else None
         if must_break:
             spans.append((cur_start, cur_end))
-            back = _overlap_start(nd.text, cur_end, overlap, cur_start + 1)
-            cur_start = min(back, unit.start)
+            # Overlap would otherwise splice the previous message's tail onto an
+            # unrelated header — only keep it within the same thread.
+            same_thread = subject is not None and subject == last_subject
+            if unit.is_header and not same_thread:
+                cur_start = unit.start
+            else:
+                back = _overlap_start(nd.text, cur_end, overlap, cur_start + 1)
+                cur_start = min(back, unit.start)
             cur_words = _count_words(nd.text[cur_start : unit.start])
+        if subject is not None:
+            last_subject = subject
         if cur_start is None:
             cur_start = unit.start
         cur_end = unit.end
@@ -226,6 +280,11 @@ def chunk_document(
     chunks: list[Chunk] = []
     for i, (start, end) in enumerate(spans):
         text = nd.text[start:end]
+        is_header = nd.in_header(start, end)
+        if not is_header:
+            governing = _governing_header(nd.header_spans, start)
+            if governing is not None:
+                text = nd.text[governing[0] : governing[1]] + "\n\n" + text
         page_start, page_end = nd.page_range(start, end)
         chunks.append(
             Chunk(
@@ -238,7 +297,7 @@ def chunk_document(
                 page_bates_start=page_start,
                 page_bates_end=page_end,
                 page_is_exact=nd.has_pages,
-                is_header=nd.in_header(start, end),
+                is_header=is_header,
                 n_words=_count_words(text),
                 text=text,
             )
