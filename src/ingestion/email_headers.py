@@ -9,6 +9,7 @@ they get their own parser rather than waiting on NER.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 
@@ -93,7 +94,11 @@ def split_recipients(value: str) -> list[dict]:
 
 @dataclass
 class EmailMessage:
-    """One header block found in a document."""
+    """One header block found in a document.
+
+    ``char_start`` / ``char_end`` are offsets into the *raw* document text, which
+    is what lets an edge cite the page it came from.
+    """
 
     doc_id: str
     block_index: int
@@ -105,6 +110,38 @@ class EmailMessage:
     subject: str | None = None
     sent_raw: str | None = None
     attachments: str | None = None
+    char_start: int = 0
+    char_end: int = 0
+
+    @property
+    def sender_key(self) -> str | None:
+        """Best available identifier for the sender, address preferred."""
+        if self.sender_address:
+            return self.sender_address
+        return self.sender_name.lower() if self.sender_name else None
+
+    def message_key(self) -> str:
+        """Stable hash of the message itself, ignoring which document it sits in.
+
+        The same message is quoted in many documents; this collapses those copies
+        so an edge can be weighted by distinct messages rather than by sightings.
+        """
+        targets = sorted(
+            filter(
+                None,
+                (r["address"] or (r["name"].lower() if r["name"] else None)
+                 for r in self.recipients + self.cc),
+            )
+        )
+        payload = "|".join(
+            [
+                self.sender_key or "",
+                ",".join(targets),
+                (self.subject or "").strip().lower(),
+                (self.sent_raw or "").strip().lower(),
+            ]
+        )
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def parse_headers(doc_id: str, text: str) -> list[EmailMessage]:
@@ -137,8 +174,10 @@ def parse_headers(doc_id: str, text: str) -> list[EmailMessage]:
                 block_index=len(messages),
                 is_forwarded=any(s < m.start() for s in forward_spans)
                 and len(messages) > 0,
+                char_start=m.start(),
             )
         last_end = m.end()
+        current.char_end = m.end()
 
         if key == "from":
             people = split_recipients(value)
