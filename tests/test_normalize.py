@@ -124,9 +124,11 @@ def test_empty_document():
 
 
 def test_chunks_are_contiguous_spans_of_the_clean_text():
+    # Every chunk's own span is a suffix of its text — a governing header, if
+    # any, is prepended on top and isn't part of the chunk's own char span.
     nd = normalise("DOC_1", RAW)
     for chunk in chunk_document(nd, target=40, overlap=5):
-        assert nd.text[chunk.char_start : chunk.char_end] == chunk.text
+        assert chunk.text.endswith(nd.text[chunk.char_start : chunk.char_end])
 
 
 def test_chunks_advance():

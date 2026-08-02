@@ -62,7 +62,7 @@ def main() -> None:
                     "page_bates_start": chunk.page_bates_start,
                     "page_bates_end": chunk.page_bates_end,
                     "page_is_exact": chunk.page_is_exact,
-                    "is_header": chunk.is_header,
+                    "has_header": chunk.has_header,
                     "n_words": chunk.n_words,
                     "text": chunk.text,
                     **{col: row[col] for col in CARRY_COLUMNS},
@@ -76,7 +76,7 @@ def main() -> None:
     print(f"chunks              {len(chunks):>10,}")
     print(f"mean words / chunk  {chunks['n_words'].mean():>10.0f}")
     print(f"chunks with a page  {chunks['page_is_exact'].sum():>10,}")
-    print(f"header chunks       {int(chunks['is_header'].sum()):>10,}")
+    print(f"chunks with header  {int(chunks['has_header'].sum()):>10,}")
     print(f"wrote {out / 'chunks.parquet'}")
 
 
