@@ -194,12 +194,17 @@ def test_real_documents_round_trip():
         assert chunks or not nd.text.strip()
 
         for chunk in chunks:
-            assert nd.text[chunk.char_start : chunk.char_end] == chunk.text
+            # A continuation chunk of a multi-chunk message has its governing
+            # header copied onto the front, so the real span is a suffix of
+            # chunk.text rather than an exact match — see chunking.py rule 1.
+            body_text = nd.text[chunk.char_start : chunk.char_end]
+            assert chunk.text.endswith(body_text)
             assert 0 <= chunk.src_start <= chunk.src_end <= len(raw)
-            # The chunk's words should appear in the raw span it claims, allowing
-            # for the words normalisation repaired or removed.
+            # The chunk's own body words (excluding any prepended header, which
+            # isn't drawn from this span) should appear in the raw span it claims,
+            # allowing for the words normalisation repaired or removed.
             source_words = set(_words(raw[chunk.src_start : chunk.src_end]))
-            chunk_words = _words(chunk.text)
+            chunk_words = _words(body_text)
             if len(chunk_words) >= 20:
                 overlap = sum(1 for w in chunk_words if w in source_words)
                 assert overlap / len(chunk_words) > 0.8, chunk.chunk_id

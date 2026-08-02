@@ -12,10 +12,12 @@ from pathlib import Path
 import anthropic
 import pandas as pd
 import yaml
+from dotenv import load_dotenv
 
 from .retriever import Retriever
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(REPO_ROOT / ".env")
 
 SYSTEM_PROMPT = (
     "You are answering questions about a corpus of legal/business documents "
