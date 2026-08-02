@@ -12,7 +12,13 @@ from typing import Iterable, Iterator
 
 import pandas as pd
 
-from .schema import SPACY_TYPE_MAP, Mention, is_plausible
+from .schema import (
+    SPACY_TYPE_MAP,
+    Mention,
+    chunk_offsets as _chunk_offsets,
+    document_span as _document_span,
+    is_plausible,
+)
 
 DEFAULT_MODEL = "en_core_web_lg"
 SYSTEM = "spacy"
@@ -47,22 +53,23 @@ def extract(
 
 
 def _mentions_from_doc(row: dict, doc) -> Iterator[Mention]:
-    offset = int(row["char_start"])
+    offset, prefix = _chunk_offsets(row)
     for ent in doc.ents:
         mapped = SPACY_TYPE_MAP.get(ent.label_)
         if mapped is None or not is_plausible(ent.text, mapped):
             continue
+        doc_start, doc_end, note = _document_span(offset, prefix, ent.start_char, ent.end_char)
         yield Mention(
             system=SYSTEM,
             doc_id=row["doc_id"],
             chunk_id=row["chunk_id"],
             start=ent.start_char,
             end=ent.end_char,
-            doc_start=offset + ent.start_char,
-            doc_end=offset + ent.end_char,
+            doc_start=doc_start,
+            doc_end=doc_end,
             surface=ent.text,
             type=mapped,
-            note=ent.label_ if ent.label_ != mapped else None,
+            note=note or (ent.label_ if ent.label_ != mapped else None),
         )
 
 

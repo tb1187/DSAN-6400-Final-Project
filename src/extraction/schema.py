@@ -94,6 +94,34 @@ def normalise_surface(surface: str) -> str:
     return WS_RE.sub(" ", text).strip().lower()
 
 
+def chunk_offsets(row) -> tuple[int, int]:
+    """``(document offset of the chunk's body, length of any prepended header)``.
+
+    Chunks carry their message's ``From:/Sent:/To:`` block prepended to the text,
+    but ``char_start``/``char_end`` delimit only the *body*. So a position in
+    ``chunk.text`` maps into the document as
+    ``char_start + (position - prefix_len)`` — and a position inside the prefix
+    does not correspond to this span at all, because that header text physically
+    lives elsewhere in the document.
+    """
+    span = int(row["char_end"]) - int(row["char_start"])
+    return int(row["char_start"]), max(len(row["text"]) - span, 0)
+
+
+def document_span(
+    char_start: int, prefix_len: int, start: int, end: int
+) -> tuple[int, int, str | None]:
+    """Map a chunk-relative span to document coordinates.
+
+    Mentions found inside a prepended header get no document offsets: the header
+    is a copy, so the position is ambiguous. They are flagged instead — and the
+    header layer is covered deterministically by the email parser anyway.
+    """
+    if start < prefix_len:
+        return -1, -1, "in_prepended_header"
+    return char_start + (start - prefix_len), char_start + (end - prefix_len), None
+
+
 def is_plausible(surface: str, type_: str) -> bool:
     """Cheap filter for spans no adjudicator should have to look at.
 
@@ -114,6 +142,8 @@ def is_plausible(surface: str, type_: str) -> bool:
 __all__ = [
     "Mention",
     "TYPES",
+    "chunk_offsets",
+    "document_span",
     "SPACY_TYPE_MAP",
     "normalise_surface",
     "is_plausible",

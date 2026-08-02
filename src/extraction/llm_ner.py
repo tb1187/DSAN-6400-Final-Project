@@ -29,7 +29,14 @@ from typing import Iterable
 
 import pandas as pd
 
-from .schema import TYPES, Mention, is_plausible, normalise_surface
+from .schema import (
+    TYPES,
+    Mention,
+    chunk_offsets,
+    document_span,
+    is_plausible,
+    normalise_surface,
+)
 
 DEFAULT_MODEL = "claude-sonnet-5"
 MAX_TOKENS = 4096
@@ -171,7 +178,7 @@ def _locate(text: str, surface: str, used: set[int]) -> tuple[int, int] | None:
 
 def _to_mentions(system: str, row: dict, entities: Iterable[dict]) -> list[Mention]:
     text = row["text"]
-    offset = int(row["char_start"])
+    offset, prefix_len = chunk_offsets(row)
     used: set[int] = set()
     mentions: list[Mention] = []
 
@@ -206,6 +213,7 @@ def _to_mentions(system: str, row: dict, entities: Iterable[dict]) -> list[Menti
             continue
         start, end = span
         used.add(start)
+        doc_start, doc_end, placement = document_span(offset, prefix_len, start, end)
         mentions.append(
             Mention(
                 system=system,
@@ -213,11 +221,11 @@ def _to_mentions(system: str, row: dict, entities: Iterable[dict]) -> list[Menti
                 chunk_id=row["chunk_id"],
                 start=start,
                 end=end,
-                doc_start=offset + start,
-                doc_end=offset + end,
+                doc_start=doc_start,
+                doc_end=doc_end,
                 surface=text[start:end],
                 type=type_,
-                note=entity.get("verdict"),
+                note=placement or entity.get("verdict"),
             )
         )
     return mentions
