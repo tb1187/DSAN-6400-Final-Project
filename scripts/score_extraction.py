@@ -23,6 +23,7 @@ small slice of ground truth that exists independently of what any system found.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -73,17 +74,32 @@ def agreement(judged: pd.DataFrame) -> tuple[float | None, int]:
     return float(cohen_kappa_score(wide[first], wide[second])), len(wide)
 
 
-def build_gold(judged: pd.DataFrame, key: pd.DataFrame) -> pd.DataFrame:
+def build_gold(
+    judged: pd.DataFrame, key: pd.DataFrame, resolution: str = "strict"
+) -> pd.DataFrame:
     """The adjudicated truth: pooled rows that are genuinely entities.
 
     A row marked wrong but given a ``true_type`` is still an entity — it was
     simply mislabelled — so it enters the gold set under its corrected type.
+
+    ``resolution`` decides what happens where annotators disagree:
+
+    ``strict``   the stricter verdict wins (a row either of them rejected is out)
+    ``lenient``  the more permissive verdict wins
+    ``exclude``  disagreed rows are dropped from the gold set entirely
+
+    With low inter-annotator agreement this choice does real work, so it is a
+    parameter to be reported rather than a constant buried in the code.
     """
-    # One verdict per pool_id; where annotators disagree, the stricter wins.
-    resolved = (
-        judged.sort_values("verdict")
-        .groupby("pool_id", as_index=False)
-        .agg(verdict=("verdict", "first"), true_type=("true_type", "max"))
+    if resolution == "exclude":
+        spread = judged.groupby("pool_id")["verdict"].nunique()
+        judged = judged[judged["pool_id"].isin(spread[spread == 1].index)]
+
+    # 'n' sorts before 'y', so first == strict and last == lenient.
+    ordered = judged.sort_values("verdict")
+    take = "last" if resolution == "lenient" else "first"
+    resolved = ordered.groupby("pool_id", as_index=False).agg(
+        verdict=("verdict", take), true_type=("true_type", "max")
     )
     merged = resolved.merge(key[["pool_id", "doc_id", "norm", "type"]], on="pool_id")
     merged["gold_type"] = merged.apply(
@@ -103,6 +119,18 @@ def score(predictions: set, gold: set) -> dict:
     return {"tp": tp, "fp": fp, "fn": fn, "precision": precision, "recall": recall, "f1": f1}
 
 
+NON_PERSON_HEADER = re.compile(
+    r"mailer|daemon|postmaster|no ?reply|href|http|smtp|newsletter|notification|"
+    r"\bgps\b|\d",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_a_person(norm: str) -> bool:
+    """Exclude header names the parser produced that are not people."""
+    return not NON_PERSON_HEADER.search(norm)
+
+
 def header_probe(out: Path, mentions: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Independent recall probe from parsed email headers.
 
@@ -111,20 +139,25 @@ def header_probe(out: Path, mentions: dict[str, pd.DataFrame]) -> pd.DataFrame:
     nothing to the pool.
     """
     edges_path = out / "email_edges.parquet"
-    sample_path = out / "eval_sample.parquet"
     if not edges_path.exists():
         return pd.DataFrame()
 
-    sample_docs = set(pd.read_parquet(sample_path)["doc_id"])
+    # The denominator must cover exactly the documents the numerator can draw
+    # from. Scoring expected names over all sampled documents while mentions come
+    # only from the adjudicated ones halves the apparent recall.
+    scored_docs = set().union(*(set(f["doc_id"]) for f in mentions.values())) if mentions else set()
     edges = pd.read_parquet(edges_path)
-    edges = edges[edges["doc_id"].isin(sample_docs)]
+    edges = edges[edges["doc_id"].isin(scored_docs)]
 
     expected = set()
     for column in ("source_name", "target_name"):
         for doc_id, name in edges[["doc_id", column]].dropna().itertuples(index=False):
             norm = normalise_surface(str(name))
-            # Single tokens are too ambiguous to score fairly.
-            if norm and len(norm.split()) >= 2:
+            # Single tokens are too ambiguous to score fairly, and the parser
+            # itself picks up non-people (mailer-daemon addresses, HTML
+            # fragments, OCR noise) — counting those as missed entities would
+            # measure the header parser rather than the extractors.
+            if norm and len(norm.split()) >= 2 and _looks_like_a_person(norm):
                 expected.add((doc_id, norm))
     if not expected:
         return pd.DataFrame()

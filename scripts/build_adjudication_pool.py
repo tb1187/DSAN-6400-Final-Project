@@ -24,10 +24,13 @@ Fill in two columns: ``verdict`` (y / n) and, when a type is wrong, ``true_type`
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
 import pandas as pd
+
+WS_RE = re.compile(r"\s+")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -38,12 +41,24 @@ SYSTEMS = ("spacy", "llm", "hybrid")
 CONTEXT_CHARS = 60
 
 
+def _spreadsheet_safe(text: str) -> str:
+    """Keep a cell from being parsed as a formula, and flatten line breaks.
+
+    Excel and Sheets evaluate any cell starting with = + - or @, so OCR text like
+    ``----------This Electronic Message`` renders as ``#NAME?`` and the annotator
+    loses the context they need. A leading space defuses it and costs nothing,
+    since these columns are only ever read by a human.
+    """
+    flattened = WS_RE.sub(" ", text).strip()
+    return f" {flattened}" if flattened[:1] in "=+-@" else flattened
+
+
 def _context(chunk_text: str, start: int, end: int) -> tuple[str, str]:
     if start < 0:
         return "", ""
-    left = chunk_text[max(0, start - CONTEXT_CHARS) : start].replace("\n", " ")
-    right = chunk_text[end : end + CONTEXT_CHARS].replace("\n", " ")
-    return left.strip(), right.strip()
+    left = chunk_text[max(0, start - CONTEXT_CHARS) : start]
+    right = chunk_text[end : end + CONTEXT_CHARS]
+    return _spreadsheet_safe(left), _spreadsheet_safe(right)
 
 
 def main() -> None:
@@ -110,6 +125,9 @@ def main() -> None:
         "occurrences",
     ]
     sheet = key[sheet_columns].copy()
+    # The surface can contain a line break the chunker preserved; flatten it for
+    # display only. Matching uses `norm` from the key, which is unaffected.
+    sheet["surface"] = sheet["surface"].map(_spreadsheet_safe)
     sheet["verdict"] = ""
     sheet["true_type"] = ""
     sheet["notes"] = ""
