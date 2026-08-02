@@ -24,12 +24,34 @@ data/processed/*
 data/external/*
 !data/**/.gitkeep
 
+# ...except artifacts that cost money or human time to produce. Everything else
+# under data/processed is regenerated deterministically from data/raw in ~40 min
+# (build_manifest -> build_chunks -> build_email_edges -> run_extraction), so it
+# stays out of git; binaries are stored in full on every commit and chunks.parquet
+# alone is 28 MB per revision.
+!data/processed/mentions_llm.parquet
+!data/processed/mentions_hybrid.parquet
+!data/processed/mentions_spacy.parquet
+# Defines *which* 35 documents were adjudicated — the labels are meaningless
+# without it, and it is 8 KB.
+!data/processed/eval_sample.parquet
+
 # Results (keep folders, ignore generated artifacts)
 results/*
 !results/.gitkeep
 !results/figures/
 results/figures/*
 !results/figures/.gitkeep
+
+# The adjudication is the one thing in this repo that cannot be regenerated at
+# any price — roughly 1,568 human judgements. git cannot re-include a file whose
+# parent directory is excluded, so each level has to be re-admitted in turn.
+!results/adjudication/
+results/adjudication/*
+!results/adjudication/*.csv
+!results/adjudication/completed/
+results/adjudication/completed/*
+!results/adjudication/completed/*.csv
 
 # OS / editor
 .DS_Store
