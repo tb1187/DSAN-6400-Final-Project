@@ -66,6 +66,59 @@ load-file metadata.
 Weight edges by `nunique(message_key)`, not row count — 397 messages appear in more
 than one document as forwarded copies, one of them 11 times.
 
+### Tier 1 — resolving actors onto entities
+
+984 email actors → 60% link to an NER entity (36 by address, 512 by exact name,
+19 reordered, 16 via display name). The remaining 387 are **minted** as
+`EML_*` nodes rather than dropped: NER failing to find a name is not evidence
+that the correspondence did not happen, and dropping those edges would thin the
+network silently. They hold 18% of message volume. `nodes.source` says which.
+
+Names match on exact or reordered form only, never fuzzily — the value of this
+tier is precision, and a wrong link fabricates a conversation. Single-token keys
+(`weingarten`) *are* allowed on an exact alias hit, because resolution has
+already decided with document-scoped evidence whether a bare surname belongs to
+a full name.
+
+Two artefacts worth knowing about:
+
+* **Contested addresses.** Resolution attaches an address to every name that
+  matched it, so `jeevacation@gmail.com` was claimed both by `jeffrey epstein`
+  (24,678 mentions) and by `darren indyke jeffrey epstein` (2 mentions — a header
+  string spaCy read as one person). The address goes to its dominant claimant.
+* **FBI teletype routing blocks.** `FROM: MIAMI / TO: DIRECTOR / ATTN: SSA`
+  parses like an email header but its actors are field offices. Rows carrying no
+  address, subject *or* timestamp are dropped: 18 of 4,088, across 6 documents.
+  Left in, `miami` ranked third by betweenness. `miami` and `1` still appear in
+  the top ten — residual rows that do carry a subject. Flag them before reporting
+  centrality.
+
+### Tier 2 — co-occurrence weighted by NPMI
+
+Two entities named in the same chunk. Raw co-occurrence counts rank by
+*popularity* — every frequent entity looks related to every other — so edges are
+weighted by normalised PMI, which asks whether a pair appears together more than
+their individual rates predict.
+
+| filter | reason |
+|---|---|
+| entity in ≥ 3 chunks, pair in ≥ 3 chunks | below this, association is unmeasurable |
+| pair in ≥ **2 documents** | a pair confined to one document is a signature block repeating (dropped 25,143 pairs) |
+| NPMI ≥ 0.2 | association no stronger than chance |
+| chunks with > 60 entities dropped | guest lists and directories, where adjacency means nothing |
+| entities > 6 tokens, or PERSON starting with a salutation | line-break spans (`arizona state university college of liberal arts and`) and `dear jeffrey`; flagged as `nodes.noisy`, not deleted |
+
+Mentions inside a **prepended header are excluded** (28,548 of 540,586). v2
+chunking copies a message's header onto every one of its body chunks, so counting
+them multiplies one header's co-occurrences by the message's chunk count — and
+tier 1 covers that layer deterministically anyway.
+
+Result: 110,109 edges over 12,842 entities. **NPMI's top ranks are boilerplate** —
+letterheads and bank disclosures score 1.0 because they only ever appear together.
+That is the metric behaving correctly on repeated text, not a bug; rank by
+`n_chunks` for reporting, and read NPMI as a filter rather than an importance
+score.
+
 ---
 
 ## 3. Extraction comparison
