@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 import pandas as pd
 from rapidfuzz import fuzz
 
+from src.extraction.schema import SALUTATION_RE
+
 # Legal and corporate suffixes carry no identity — "Indyke PLLC" and "Indyke" are
 # the same firm. Stripped for ORG comparison only.
 ORG_SUFFIX_RE = re.compile(
@@ -300,9 +302,18 @@ def resolve(
     rows, alias_rows = [], []
     for i, ((root, type_), members) in enumerate(sorted(clusters.items())):
         totals = {m: int(counts_by_form.get((m, type_), 0)) for m in members}
-        # Canonical form: the most-mentioned member, preferring a full name.
+        # Canonical form: the most-mentioned member, preferring a full name —
+        # but never a salutation. "dear jeffrey" (60 mentions) otherwise beats
+        # "jeffrey" (2,187) for having two tokens, and the node is then named
+        # after the greeting rather than the person.
         canonical = max(
-            members, key=lambda m: (len(m.split()) > 1, totals[m], len(m))
+            members,
+            key=lambda m: (
+                not SALUTATION_RE.match(m),
+                len(m.split()) > 1,
+                totals[m],
+                len(m),
+            ),
         )
         entity_id = f"{type_[:3]}_{i:06d}"
         rows.append(

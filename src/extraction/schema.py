@@ -30,6 +30,13 @@ SPACY_TYPE_MAP = {
     "FAC": "GPE",
 }
 
+#: Salutations and discourse openers that spaCy types as part of a person's
+#: name — "Dear Jeffrey", "Hi Reid". The name inside is real, so these are not
+#: discarded; they are just never allowed to represent the entity.
+SALUTATION_RE = re.compile(
+    r"^(dear|hi|hello|hey|thanks|thank|dearest|attn|re|fw|fwd|i)\b", re.IGNORECASE
+)
+
 TITLE_RE = re.compile(
     r"^(mr|mrs|ms|miss|dr|prof|professor|judge|justice|senator|sen|rep|hon|sir|dame|"
     r"president|amb|ambassador|gov|governor|atty|attorney|det|officer)\.?\s+",

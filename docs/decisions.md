@@ -93,6 +93,53 @@ Two artefacts worth knowing about:
   the top ten — residual rows that do carry a subject. Flag them before reporting
   centrality.
 
+### Tier 1 — when messages were sent
+
+97% of header blocks carry a parseable `Sent:` value, giving every
+`communicated_with` edge a `first_sent`, `last_sent` and `span_days`. The corpus
+runs **2006-09-14 to 2019-07-16**, heavily concentrated in 2016–18 (538/527/555
+messages) — so a static network averages over a decade in which the cast changes
+completely. Epstein is the hub throughout, but the secondary hubs are not:
+
+| era | edges | hubs after Epstein |
+|---|---|---|
+| 2006–13 | 308 | Lesley Groff, Jay Lefkowitz |
+| 2014–16 | 448 | Daniel Schecter, Will Bohlen |
+| 2017–19 | 368 | Martin Weinberg, Steve Bannon |
+
+Two parsing rules matter. A **four-digit year is required** — without one dateutil
+silently supplies the current year, which is how two messages were dated 2026.
+Anything outside 1990–2021 is dropped as a misparse. And formats are mixed:
+`12/9/2016` is month-first while `15/10/2014 (GMT+02:00)` is day-first. dateutil
+swaps on its own when the month exceeds 12, so only dates with both parts ≤ 12
+can be misread; the `(GMT…)` suffix marks the European clients that produce them.
+Residual day-level error is tolerable for year/month trends and is *not* safe for
+ordering two messages sent the same week.
+
+### Tier 1 — co-recipients and threads
+
+**`co_recipient_of`** (693 edges): two people addressed on the same message. A tie
+even where neither wrote to the other — both were chosen as the audience for the
+same thing. Rows are deduplicated on `(message_key, recipient)` first, because a
+forwarded copy surviving in seven documents lists its recipients seven times;
+document evidence is still collected from all seven.
+
+**`participated_in`** (1,080 edges over 296 threads, 1,155 messages): messages are
+grouped into threads, and each participant links to the thread.
+
+A shared subject alone is too weak a key — "trump" heads 63 messages and "jane
+doe" 91, across unrelated conversations. Messages join a thread only if they also
+**share a participant** and sit **within 30 days** of each other. The time window
+is not optional: Epstein is in nearly every message, so participant overlap alone
+chained six years of mail into one 61-message "trump" thread. With the window,
+threads look like conversations — median span **0 days**, 90th percentile 2 days,
+max 36.
+
+Threads are their own nodes (`type = THREAD`), not a clique over participants: a
+12-person thread would otherwise contribute 66 edges and inflate everyone's
+centrality. Project to co-participation with one `networkx` call if that is
+wanted — the bipartite form keeps the choice open and carries evidence.
+
 ### Tier 2 — co-occurrence weighted by NPMI
 
 Two entities named in the same chunk. Raw co-occurrence counts rank by
@@ -229,4 +276,10 @@ python scripts/build_manifest.py       # ~50s
 python scripts/build_chunks.py         # ~35s
 python scripts/build_email_edges.py    # ~30s
 python scripts/run_extraction.py --system spacy --scope corpus   # ~35 min
+python scripts/resolve_entities.py     # ~1 min
+python scripts/build_edges.py          # ~3 min
 ```
+
+`resolve_entities.py` and `build_edges.py` must be re-run together — the graph's
+`entity_id`s come from the former, so an edge table built against a stale
+`entities.parquet` points at ids that no longer mean the same thing.

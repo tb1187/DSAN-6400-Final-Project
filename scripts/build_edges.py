@@ -21,10 +21,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.knowledge_graph.edges import (  # noqa: E402
+    co_recipient_edges,
     communication_edges,
     cooccurrence_edges,
     link_mentions,
     noisy_entities,
+    resolve_actors,
+    thread_edges,
 )
 
 EDGE_COLUMNS = [
@@ -40,6 +43,9 @@ EDGE_COLUMNS = [
     "n_cc",
     "n_chunks",
     "subjects",
+    "first_sent",
+    "last_sent",
+    "span_days",
 ]
 
 
@@ -70,8 +76,10 @@ def main() -> None:
     if 1 in tiers:
         email_edges = pd.read_parquet(out / "email_edges.parquet")
         email_messages = pd.read_parquet(out / "email_messages.parquet")
-        comms, minted = communication_edges(email_edges, email_messages, entities, aliases)
+        actors = resolve_actors(email_edges, email_messages, entities, aliases)
+        comms = communication_edges(actors)
         stats = comms.attrs["actor_resolution"]
+        minted = actors.minted
 
         print(f"\ntier 1 — communicated_with")
         print(f"  actors            {comms.attrs['n_actors']:>8,}")
@@ -85,12 +93,50 @@ def main() -> None:
         print(f"  linked to an NER entity: "
               f"{1 - len(minted) / max(comms.attrs['n_actors'], 1):.0%} of actors")
 
+        dated = comms["first_sent"].notna()
+        print(f"\n  dates: {int(dated.sum()):,}/{len(comms):,} edges dated"
+              f"  ({comms.attrs['dates_unparsed']:,} rows unparsed,"
+              f" {comms.attrs['dates_out_of_range']:,} out of corpus range)")
+        if dated.any():
+            print(f"  span:  {comms.loc[dated, 'first_sent'].min():%Y-%m-%d}"
+                  f" .. {comms.loc[dated, 'last_sent'].max():%Y-%m-%d}")
+            per_year = actors.rows.dropna(subset=["sent_at"]).drop_duplicates("message_key")
+            counts = per_year["sent_at"].dt.year.value_counts().sort_index()
+            print("  messages/year: " + "  ".join(f"{y}:{n}" for y, n in counts.items()))
+
         if len(minted):
             nodes = pd.concat([nodes, minted], ignore_index=True)
         all_edges.append(comms)
 
         print("\n  strongest ties (by distinct messages):")
-        print(_label(comms.head(10), nodes).to_string(index=False))
+        print(_label(comms.head(10), nodes, extra=["first_sent", "last_sent"]).to_string(index=False))
+
+        corec = co_recipient_edges(actors)
+        print(f"\ntier 1 — co_recipient_of")
+        print(f"  edges             {len(corec):>8,}"
+              f"   ({int((corec['n_cc'] > 0).sum()):,} involve a cc)")
+        all_edges.append(corec)
+        print("\n  most-shared audiences:")
+        print(_label(corec.head(8), nodes).to_string(index=False))
+
+        threads, thread_nodes = thread_edges(actors)
+        print(f"\ntier 1 — participated_in")
+        print(f"  threads           {len(thread_nodes):>8,}")
+        if len(thread_nodes):
+            print(f"  messages threaded {int(thread_nodes['n_mentions'].sum()):>8,}")
+            print(f"  edges             {len(threads):>8,}")
+            print(f"  participants/thread: median {thread_nodes['n_participants'].median():.0f}"
+                  f"  max {thread_nodes['n_participants'].max()}")
+            nodes = pd.concat([nodes, thread_nodes], ignore_index=True)
+            all_edges.append(threads)
+            print("\n  biggest threads:")
+            print(
+                thread_nodes.nlargest(8, "n_mentions")[
+                    ["canonical", "n_mentions", "n_participants", "first_sent", "last_sent"]
+                ]
+                .rename(columns={"canonical": "subject", "n_mentions": "n_messages"})
+                .to_string(index=False)
+            )
 
     if 2 in tiers:
         noisy = noisy_entities(entities)
@@ -128,10 +174,10 @@ def main() -> None:
     print(f"\nwrote {out / 'nodes.parquet'} and {out / 'edges.parquet'}")
 
 
-def _label(edges: pd.DataFrame, nodes: pd.DataFrame) -> pd.DataFrame:
+def _label(edges: pd.DataFrame, nodes: pd.DataFrame, extra: list[str] | None = None) -> pd.DataFrame:
     """Swap entity ids for canonical names, for reading."""
     names = dict(zip(nodes["entity_id"], nodes["canonical"]))
-    weight_cols = [c for c in ("weight", "n_chunks", "n_docs") if c in edges]
+    weight_cols = [c for c in ("weight", "n_chunks", "n_docs", *(extra or [])) if c in edges]
     out = pd.DataFrame(
         {
             "source": edges["src"].map(names),

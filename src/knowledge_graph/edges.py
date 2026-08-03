@@ -16,20 +16,26 @@ can be traced back to the page it came from.
 from __future__ import annotations
 
 import re
+import warnings
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from itertools import combinations
 from math import log
 
 import pandas as pd
+from dateutil.parser import UnknownTimezoneWarning
+from dateutil.parser import parse as dateutil_parse
 
-from src.extraction.schema import normalise_surface
-from src.knowledge_graph.resolution import canonical_addresses
+from src.extraction.schema import SALUTATION_RE, normalise_surface
+from src.knowledge_graph.resolution import _Union, canonical_addresses
 
 #: Mentions that landed inside a chunk's prepended header copy.
 HEADER_NOTE = "in_prepended_header"
 
 #: How many pieces of evidence to keep on an edge before truncating.
 EVIDENCE_CAP = 20
+
+WS_RE = re.compile(r"\s+")
 
 
 # --------------------------------------------------------------------------
@@ -160,16 +166,31 @@ class ActorResolver:
         return node_id, "minted"
 
 
-def communication_edges(
+@dataclass
+class ActorMap:
+    """Email actors resolved onto entities, shared by every tier-1 builder.
+
+    ``rows`` is the edge table after routing blocks are dropped, with ``src`` and
+    ``dst`` entity ids and a parsed ``sent_at`` already attached.
+    """
+
+    rows: pd.DataFrame
+    minted: pd.DataFrame
+    stats: dict
+    n_actors: int
+    contested: int
+    routing_dropped: int
+    dates_unparsed: int
+    dates_out_of_range: int
+
+
+def resolve_actors(
     email_edges: pd.DataFrame,
     email_messages: pd.DataFrame,
     entities: pd.DataFrame,
     aliases: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Directed sender→recipient edges between entities.
-
-    Returns ``(edges, minted_nodes)``.
-    """
+) -> ActorMap:
+    """Resolve every email actor once, for all tier-1 relations to share."""
     email_edges, routing = _drop_routing_headers(email_edges)
 
     addresses = pd.concat(
@@ -195,9 +216,23 @@ def communication_edges(
     rows = email_edges.copy()
     rows["src"] = rows["source"].astype(str).map(lambda k: resolved[k][0])
     rows["dst"] = rows["target"].astype(str).map(lambda k: resolved[k][0])
-    rows["src_how"] = rows["source"].astype(str).map(lambda k: resolved[k][1])
-    rows["dst_how"] = rows["target"].astype(str).map(lambda k: resolved[k][1])
+    rows["sent_at"], unparsed, out_of_range = parse_sent_column(rows["sent_raw"])
 
+    return ActorMap(
+        rows=rows,
+        minted=pd.DataFrame(list(resolver.minted.values())),
+        stats=dict(resolver.stats),
+        n_actors=len(keys),
+        contested=resolver.contested,
+        routing_dropped=routing,
+        dates_unparsed=unparsed,
+        dates_out_of_range=out_of_range,
+    )
+
+
+def communication_edges(actors: ActorMap) -> pd.DataFrame:
+    """Directed sender→recipient edges between entities, with a date span."""
+    rows = actors.rows
     # An actor mailing an address that resolves to the same person is an artefact
     # of one person holding several mailboxes, not a relationship.
     self_edges = int((rows["src"] == rows["dst"]).sum())
@@ -209,21 +244,273 @@ def communication_edges(
         n_rows=("message_key", "size"),
         n_docs=("doc_id", "nunique"),
         n_cc=("is_cc", "sum"),
+        first_sent=("sent_at", "min"),
+        last_sent=("sent_at", "max"),
     ).reset_index()
     edges["doc_ids"] = grouped["doc_id"].agg(_evidence).values
     edges["page_bates"] = grouped["page_bates"].agg(_evidence).values
     edges["subjects"] = grouped["subject"].agg(lambda s: _evidence(s, cap=3)).values
+    edges["span_days"] = (edges["last_sent"] - edges["first_sent"]).dt.days
     edges["relation"] = "communicated_with"
     edges["tier"] = 1
     edges = edges.sort_values("weight", ascending=False).reset_index(drop=True)
 
-    minted = pd.DataFrame(list(resolver.minted.values()))
-    edges.attrs["actor_resolution"] = dict(resolver.stats)
-    edges.attrs["n_actors"] = len(keys)
-    edges.attrs["contested_addresses"] = resolver.contested
-    edges.attrs["routing_rows_dropped"] = routing
+    edges.attrs["actor_resolution"] = actors.stats
+    edges.attrs["n_actors"] = actors.n_actors
+    edges.attrs["contested_addresses"] = actors.contested
+    edges.attrs["routing_rows_dropped"] = actors.routing_dropped
     edges.attrs["self_edges_dropped"] = self_edges
-    return edges, minted
+    edges.attrs["dates_unparsed"] = actors.dates_unparsed
+    edges.attrs["dates_out_of_range"] = actors.dates_out_of_range
+    return edges
+
+
+# --------------------------------------------------------------------------
+# tier 1 — co-recipients
+# --------------------------------------------------------------------------
+
+
+def co_recipient_edges(actors: ActorMap) -> pd.DataFrame:
+    """Undirected edges between people addressed on the same message.
+
+    Distinct from ``communicated_with``: two people on one To: line have a tie
+    even if neither ever wrote to the other. Both were chosen, by someone, as
+    the audience for the same thing.
+
+    Recipient rows repeat once per document a message survives in — a forwarded
+    copy in seven documents lists its three recipients seven times — so rows are
+    deduplicated on ``(message_key, dst)`` before pairing.
+    """
+    # Deduplicate for *counting* but keep every document a message survives in
+    # as evidence — a forwarded copy is one message found in several places.
+    docs_by_message = actors.rows.groupby("message_key")["doc_id"].agg(set)
+    rows = actors.rows.drop_duplicates(subset=["message_key", "dst"])
+
+    pair_messages: dict[tuple[str, str], set] = defaultdict(set)
+    pair_docs: dict[tuple[str, str], set] = defaultdict(set)
+    pair_cc: Counter = Counter()
+    subjects: dict[tuple[str, str], Counter] = defaultdict(Counter)
+    dates: dict[tuple[str, str], list] = defaultdict(list)
+
+    for message_key, group in rows.groupby("message_key", sort=False):
+        recipients = sorted(set(group["dst"]))
+        if len(recipients) < 2:
+            continue
+        cc_flags = dict(zip(group["dst"], group["is_cc"]))
+        for pair in combinations(recipients, 2):
+            pair_messages[pair].add(message_key)
+            pair_docs[pair].update(docs_by_message.get(message_key, ()))
+            if all(bool(cc_flags.get(r)) for r in pair):
+                pair_cc[pair] += 1
+            for subject in group["subject"].dropna():
+                subjects[pair][str(subject)] += 1
+            dates[pair].extend(group["sent_at"].dropna())
+
+    rows_out = []
+    for pair, messages in pair_messages.items():
+        when = pd.Series(dates[pair], dtype="datetime64[ns]")
+        rows_out.append(
+            {
+                "src": pair[0],
+                "dst": pair[1],
+                "weight": len(messages),
+                "n_docs": len(pair_docs[pair]),
+                "n_cc": pair_cc[pair],
+                "doc_ids": _truncate(sorted(str(d) for d in pair_docs[pair] if d)),
+                "subjects": _truncate([s for s, _ in subjects[pair].most_common(3)], cap=3),
+                "first_sent": when.min() if len(when) else pd.NaT,
+                "last_sent": when.max() if len(when) else pd.NaT,
+                "relation": "co_recipient_of",
+                "tier": 1,
+            }
+        )
+
+    columns = ["src", "dst", "weight", "n_docs", "n_cc", "doc_ids", "subjects",
+               "first_sent", "last_sent", "relation", "tier"]
+    edges = pd.DataFrame(rows_out, columns=columns)
+    return edges.sort_values("weight", ascending=False).reset_index(drop=True)
+
+
+# --------------------------------------------------------------------------
+# tier 1 — threads
+# --------------------------------------------------------------------------
+
+#: Leading "Re:"/"Fwd:" chains, however many deep.
+SUBJECT_PREFIX_RE = re.compile(r"^\s*(?:(?:re|fw|fwd|fyi)\s*:\s*)+", re.IGNORECASE)
+
+#: Subjects that identify nothing and would merge unrelated conversations.
+EMPTY_SUBJECTS = {"", "<no subject>", "no subject", "none", "(no subject)"}
+
+#: A thread needs at least this many messages to be a conversation.
+MIN_THREAD_MESSAGES = 2
+
+#: Two messages under one subject join the same thread only if they are this
+#: close in time. Without it, Epstein — who is in almost every message — chains
+#: six years of unrelated mail under "trump" into a single 61-message thread.
+THREAD_WINDOW_DAYS = 30
+
+
+def normalise_subject(subject) -> str:
+    if not isinstance(subject, str):
+        return ""
+    stripped = SUBJECT_PREFIX_RE.sub("", subject).strip().lower()
+    stripped = WS_RE.sub(" ", stripped)
+    return "" if stripped in EMPTY_SUBJECTS or len(stripped) < 4 else stripped
+
+
+def thread_edges(actors: ActorMap) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Group messages into threads and link each participant to its thread.
+
+    A shared subject alone is too weak a key — "trump" heads 63 messages and
+    "jane doe" 91, spanning conversations with nothing to do with each other.
+    Messages are therefore clustered within a subject only when they also share
+    a participant, which splits a reused subject line back into the separate
+    exchanges it actually names.
+
+    Threads become their own nodes rather than a clique over participants: a
+    thread with 12 people would otherwise contribute 66 edges and inflate every
+    one of their centralities. Project to co-participation if that is wanted —
+    the bipartite form keeps the choice open, and carries evidence.
+
+    Returns ``(edges, thread_nodes)``.
+    """
+    rows = actors.rows.copy()
+    rows["subject_norm"] = rows["subject"].map(normalise_subject)
+    rows = rows[rows["subject_norm"] != ""]
+
+    threads: list[dict] = []
+    for subject, group in rows.groupby("subject_norm", sort=True):
+        by_message = group.groupby("message_key")
+        participants = {
+            key: set(part["src"]) | set(part["dst"]) for key, part in by_message
+        }
+        sent = {key: part["sent_at"].min() for key, part in by_message}
+
+        # Two messages belong together when they share a participant *and* sit
+        # close in time. An undated message joins on participants alone rather
+        # than being stranded.
+        union = _Union()
+        seen: dict[str, list[str]] = defaultdict(list)
+        window = pd.Timedelta(days=THREAD_WINDOW_DAYS)
+        for message_key, people in participants.items():
+            union.find(message_key)
+            for person in people:
+                for other in seen[person]:
+                    a, b = sent.get(message_key), sent.get(other)
+                    if pd.isna(a) or pd.isna(b) or abs(a - b) <= window:
+                        union.union(message_key, other)
+                seen[person].append(message_key)
+
+        for members in union.groups().values():
+            if len(members) < MIN_THREAD_MESSAGES:
+                continue
+            part = group[group["message_key"].isin(members)]
+            when = part["sent_at"].dropna()
+            threads.append(
+                {
+                    "subject": subject,
+                    "message_keys": set(members),
+                    "participants": Counter(
+                        list(part["src"]) + list(part["dst"])
+                    ),
+                    "doc_ids": sorted(set(str(d) for d in part["doc_id"] if d)),
+                    "pages": sorted(set(str(p) for p in part["page_bates"].dropna())),
+                    "first_sent": when.min() if len(when) else pd.NaT,
+                    "last_sent": when.max() if len(when) else pd.NaT,
+                }
+            )
+
+    threads.sort(key=lambda t: -len(t["message_keys"]))
+    nodes, edges = [], []
+    for i, thread in enumerate(threads):
+        thread_id = f"THR_{i:04d}"
+        nodes.append(
+            {
+                "entity_id": thread_id,
+                "type": "THREAD",
+                "canonical": thread["subject"],
+                "n_aliases": 1,
+                "n_mentions": len(thread["message_keys"]),
+                "addresses": "",
+                "source": "email_thread",
+                "n_participants": len(thread["participants"]),
+                "first_sent": thread["first_sent"],
+                "last_sent": thread["last_sent"],
+                "doc_ids": _truncate(thread["doc_ids"]),
+            }
+        )
+        for participant, count in thread["participants"].items():
+            edges.append(
+                {
+                    "src": participant,
+                    "dst": thread_id,
+                    "weight": count,
+                    "n_docs": len(thread["doc_ids"]),
+                    "doc_ids": _truncate(thread["doc_ids"]),
+                    "page_bates": _truncate(thread["pages"]),
+                    "subjects": thread["subject"],
+                    "first_sent": thread["first_sent"],
+                    "last_sent": thread["last_sent"],
+                    "relation": "participated_in",
+                    "tier": 1,
+                }
+            )
+
+    columns = ["src", "dst", "weight", "n_docs", "doc_ids", "page_bates", "subjects",
+               "first_sent", "last_sent", "relation", "tier"]
+    return pd.DataFrame(edges, columns=columns), pd.DataFrame(nodes)
+
+
+# --------------------------------------------------------------------------
+# when a message was sent
+# --------------------------------------------------------------------------
+
+#: The corpus runs 2006–2019. Anything outside this is a misparse — usually
+#: dateutil filling the *current* year in for a date it could not read.
+CORPUS_YEARS = (1990, 2021)
+
+#: A four-digit year has to be present. Without one, dateutil invents today's.
+YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+
+#: "(GMT+02:00)" marks a client that also writes the day first: 15/10/2014.
+DAYFIRST_RE = re.compile(r"\(GMT[+\-]", re.IGNORECASE)
+
+
+def parse_sent(raw) -> pd.Timestamp | None:
+    """Parse a header's ``Sent:`` value, or return None.
+
+    Formats are mixed — ``12/9/2016 3:46:19 PM`` beside
+    ``Tuesday, November 22, 2016 2:15 PM`` beside ``15/10/2014 (GMT+02:00)``.
+    dateutil swaps to day-first on its own when the month exceeds 12, so only
+    genuinely ambiguous dates (both parts ≤ 12) can be misread; the ``(GMT…)``
+    suffix is a reliable tell for the European clients that produce them.
+    Day-level error is tolerable for the year/month trends this feeds.
+    """
+    if not isinstance(raw, str) or not YEAR_RE.search(raw):
+        return None
+    try:
+        parsed = dateutil_parse(
+            raw, fuzzy=True, dayfirst=bool(DAYFIRST_RE.search(raw))
+        )
+    except (ValueError, OverflowError, TypeError):
+        return None
+    return pd.Timestamp(parsed.replace(tzinfo=None))
+
+
+def parse_sent_column(raw: pd.Series) -> tuple[pd.Series, int, int]:
+    """Parse a column of ``Sent:`` values. Returns ``(dates, unparsed, dropped)``."""
+    with warnings.catch_warnings():
+        # "PST identified but not understood" — the offset is dropped either way,
+        # and these are local timestamps to within a day regardless.
+        warnings.simplefilter("ignore", UnknownTimezoneWarning)
+        parsed = pd.Series(
+            [parse_sent(value) for value in raw], index=raw.index, dtype="datetime64[ns]"
+        )
+    unparsed = int(parsed.isna().sum())
+    low, high = CORPUS_YEARS
+    in_range = parsed.dt.year.between(low, high)
+    out_of_range = int((parsed.notna() & ~in_range).sum())
+    return parsed.where(in_range), unparsed, out_of_range
 
 
 def _drop_routing_headers(email_edges: pd.DataFrame) -> tuple[pd.DataFrame, int]:
@@ -277,11 +564,6 @@ MAX_ENTITIES_PER_CHUNK = 60
 #: Beyond this, a "name" is a span spaCy ran across a line break — e.g.
 #: "arizona state university college of liberal arts and".
 MAX_ENTITY_TOKENS = 6
-#: Salutations and discourse openers spaCy typed as people ("dear jeffrey",
-#: "hi reid"). They duplicate a real node and relate to whatever follows.
-SALUTATION_RE = re.compile(
-    r"^(dear|hi|hello|hey|thanks|thank|dearest|attn|re|fw|fwd|i)\b", re.IGNORECASE
-)
 
 
 def noisy_entities(entities: pd.DataFrame) -> set[str]:
@@ -384,4 +666,13 @@ def cooccurrence_edges(
     return edges
 
 
-__all__ = ["link_mentions", "communication_edges", "cooccurrence_edges"]
+__all__ = [
+    "link_mentions",
+    "resolve_actors",
+    "communication_edges",
+    "co_recipient_edges",
+    "thread_edges",
+    "cooccurrence_edges",
+    "noisy_entities",
+    "parse_sent",
+]

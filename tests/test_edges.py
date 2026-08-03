@@ -11,11 +11,22 @@ import pytest
 
 from src.knowledge_graph.edges import (
     _drop_routing_headers,
+    co_recipient_edges,
     communication_edges,
     cooccurrence_edges,
     link_mentions,
     noisy_entities,
+    parse_sent,
+    resolve_actors,
+    thread_edges,
 )
+
+
+def build(edges, entities, aliases, messages=None):
+    """Resolve actors, the way the script does, and return the ActorMap."""
+    if messages is None:
+        messages = EMPTY_MESSAGES
+    return resolve_actors(edges, messages, entities, aliases)
 
 
 def make_entities(rows):
@@ -57,7 +68,8 @@ def test_contested_address_goes_to_dominant_claimant():
     edges = make_email_edges([
         ("D1", 0, "jee@gmail.com", "reid weingarten", "Jeffrey", "Reid", False, "Re: x", "1/1/2015", "m1", "P1"),
     ])
-    result, _ = communication_edges(edges, EMPTY_MESSAGES, entities, aliases)
+    actors = build(edges, entities, aliases)
+    result = communication_edges(actors)
     assert result.iloc[0]["src"] == "PER_1"
     assert result.attrs["contested_addresses"] == 1
 
@@ -72,7 +84,8 @@ def test_single_token_key_links_only_on_exact_alias():
     edges = make_email_edges([
         ("D1", 0, "weingarten", "nobodyknown", "Weingarten", "Nobody", False, "Re: x", "1/1/2015", "m1", "P1"),
     ])
-    result, minted = communication_edges(edges, EMPTY_MESSAGES, entities, aliases)
+    actors = build(edges, entities, aliases)
+    result, minted = communication_edges(actors), actors.minted
     assert result.iloc[0]["src"] == "PER_1"
     assert len(minted) == 1  # the unknown target is minted, not dropped
     assert result.iloc[0]["dst"].startswith("EML_")
@@ -84,7 +97,8 @@ def test_reordered_name_matches():
     edges = make_email_edges([
         ("D1", 0, "weingarten, reid", "x y", "Weingarten, Reid", "X Y", False, "s", "1/1/2015", "m1", "P1"),
     ])
-    result, _ = communication_edges(edges, EMPTY_MESSAGES, entities, aliases)
+    actors = build(edges, entities, aliases)
+    result = communication_edges(actors)
     assert result.iloc[0]["src"] == "PER_1"
     assert result.attrs["actor_resolution"]["name_reordered"] == 1
 
@@ -98,7 +112,8 @@ def test_weight_counts_distinct_messages_not_rows():
         ("D2", 0, "a b", "c d", "A B", "C D", False, "s", "1/1/2015", "m1", "P2"),
         ("D3", 0, "a b", "c d", "A B", "C D", False, "s", "1/1/2015", "m2", "P3"),
     ])
-    result, _ = communication_edges(edges, EMPTY_MESSAGES, entities, aliases)
+    actors = build(edges, entities, aliases)
+    result = communication_edges(actors)
     assert result.iloc[0]["weight"] == 2
     assert result.iloc[0]["n_rows"] == 3
     assert result.iloc[0]["n_docs"] == 3
@@ -218,3 +233,98 @@ def test_link_mentions_joins_on_norm_and_type():
     linked = link_mentions(mentions, aliases)
     assert list(linked["entity_id"]) == ["PER_1", "ORG_1"]
     assert list(linked["in_header"]) == [False, True]
+
+
+# --------------------------------------------------------------------------
+# dates
+# --------------------------------------------------------------------------
+
+
+def test_parse_sent_handles_the_formats_in_the_corpus():
+    assert parse_sent("12/9/2016 3:46:19 PM").strftime("%Y-%m-%d") == "2016-12-09"
+    assert parse_sent("Tuesday, November 22, 2016 2:15 PM").strftime("%Y-%m-%d") == "2016-11-22"
+    # (GMT…) marks a day-first client: this is 15 October, not an invalid month.
+    assert parse_sent("15/10/2014 4:46 PM (GMT+02:00)").strftime("%Y-%m-%d") == "2014-10-15"
+    assert parse_sent("16/01/2015 05:16 (GMT+07:00)").strftime("%Y-%m-%d") == "2015-01-16"
+
+
+def test_parse_sent_refuses_input_without_a_year():
+    """Without a four-digit year dateutil silently supplies the current one."""
+    assert parse_sent("Tuesday 2:15 PM") is None
+    assert parse_sent("") is None
+    assert parse_sent(None) is None
+
+
+def test_dates_outside_the_corpus_range_are_dropped():
+    edges = make_email_edges([
+        ("D1", 0, "a b", "c d", "A B", "C D", False, "s", "1/1/2016", "m1", "P1"),
+        ("D2", 0, "a b", "c d", "A B", "C D", False, "s", "1/1/2087", "m2", "P2"),
+    ])
+    actors = build(edges, make_entities([]), make_aliases([]))
+    assert actors.dates_out_of_range == 1
+    assert communication_edges(actors).iloc[0]["first_sent"].year == 2016
+
+
+# --------------------------------------------------------------------------
+# co-recipients and threads
+# --------------------------------------------------------------------------
+
+
+def test_co_recipients_ignore_forwarded_duplicate_rows():
+    """One message in three documents lists its recipients three times."""
+    rows = [
+        (doc, 0, "sender x", target, "Sender X", target.title(), False, "s", "1/1/2016", "m1", page)
+        for doc, page in (("D1", "P1"), ("D2", "P2"), ("D3", "P3"))
+        for target in ("aa bb", "cc dd")
+    ]
+    actors = build(make_email_edges(rows), make_entities([]), make_aliases([]))
+    edges = co_recipient_edges(actors)
+    assert len(edges) == 1
+    assert edges.iloc[0]["weight"] == 1  # one message, not three
+    assert edges.iloc[0]["n_docs"] == 3
+
+
+def test_co_recipients_exclude_the_sender():
+    rows = [
+        ("D1", 0, "sender x", "aa bb", "Sender X", "Aa Bb", False, "s", "1/1/2016", "m1", "P1"),
+        ("D1", 0, "sender x", "cc dd", "Sender X", "Cc Dd", False, "s", "1/1/2016", "m1", "P1"),
+    ]
+    actors = build(make_email_edges(rows), make_entities([]), make_aliases([]))
+    edges = co_recipient_edges(actors)
+    ids = set(edges.iloc[0][["src", "dst"]])
+    sender = actors.rows["src"].iloc[0]
+    assert sender not in ids
+
+
+def test_threads_split_on_the_time_window():
+    """A hub participant otherwise chains years of mail into one thread."""
+    def message(key, date):
+        return ("D1", 0, "hub person", f"other {key}", "Hub", "Other", False,
+                "budget review", date, key, "P1")
+
+    rows = [message("m1", "1/2/2016"), message("m2", "1/9/2016"),   # a week apart
+            message("m3", "1/5/2019"), message("m4", "1/12/2019")]  # three years later
+    actors = build(make_email_edges(rows), make_entities([]), make_aliases([]))
+    _, threads = thread_edges(actors)
+    assert len(threads) == 2
+    assert sorted(threads["n_mentions"]) == [2, 2]
+
+
+def test_threads_ignore_empty_and_generic_subjects():
+    def message(key, subject):
+        return ("D1", 0, "hub person", "other one", "Hub", "Other", False,
+                subject, "1/2/2016", key, "P1")
+
+    rows = [message("m1", "<no subject>"), message("m2", "<no subject>"),
+            message("m3", None), message("m4", "abc")]
+    actors = build(make_email_edges(rows), make_entities([]), make_aliases([]))
+    _, threads = thread_edges(actors)
+    assert threads.empty
+
+
+def test_single_message_is_not_a_thread():
+    rows = [("D1", 0, "hub person", "other one", "Hub", "Other", False,
+             "a real subject", "1/2/2016", "m1", "P1")]
+    actors = build(make_email_edges(rows), make_entities([]), make_aliases([]))
+    edges, threads = thread_edges(actors)
+    assert threads.empty and edges.empty
