@@ -48,7 +48,14 @@ def normalise_address(raw: str) -> str:
     return a
 
 
-LAST_FIRST_RE = re.compile(r"^[A-Z][\w'\-]+,\s*[A-Z][\w'\-.]*(?:\s+[A-Z][\w'\-.]*)?$")
+#: ``Weingarten, Reid`` — and ``Thomas Jr., Landon``, where the generational
+#: suffix sits with the surname. Without the suffix branch that second form
+#: splits into two recipients, and one person becomes two nodes who appear to
+#: be corresponding with each other.
+LAST_FIRST_RE = re.compile(
+    r"^[A-Z][\w'\-]+(?:\s+(?:Jr|Sr|II|III|IV)\.?)?,"
+    r"\s*[A-Z][\w'\-.]*(?:\s+[A-Z][\w'\-.]*)?$"
+)
 
 
 def _split_parts(value: str) -> list[str]:

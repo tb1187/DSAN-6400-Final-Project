@@ -144,3 +144,15 @@ def test_self_edges_are_dropped():
 def test_address_is_preferred_over_display_name_as_the_key():
     edges = edge_list(parse_headers("DOC_1", FORWARDED))
     assert "mw@example.com" in set(edges["source"])
+
+
+def test_generational_suffix_does_not_split_a_last_first_name():
+    """"Thomas Jr., Landon" is one person, not two co-recipients."""
+    parts = split_recipients("Thomas Jr., Landon")
+    assert len(parts) == 1
+    assert parts[0]["name"] == "Thomas Jr., Landon"
+
+    # The plain form still parses, and genuine lists still split.
+    assert len(split_recipients("Weingarten, Reid")) == 1
+    assert len(split_recipients("Thomas Jr., Landon; Weingarten, Reid")) == 2
+    assert len(split_recipients("Alice Smith, Bob Jones")) == 2
