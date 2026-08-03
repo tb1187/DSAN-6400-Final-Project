@@ -23,6 +23,8 @@ data/raw/*
 data/processed/*
 data/external/*
 !data/**/.gitkeep
+!data/processed/nodes.parquet
+!data/processed/edges.parquet
 
 # ...except artifacts that cost money or human time to produce. Everything else
 # under data/processed is regenerated deterministically from data/raw in ~40 min
