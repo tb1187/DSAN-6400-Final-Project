@@ -57,3 +57,6 @@ results/adjudication/completed/*
 .DS_Store
 .idea/
 .vscode/
+
+# local docs
+docs/onboarding.md
