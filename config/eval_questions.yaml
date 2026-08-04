@@ -1,0 +1,80 @@
+# Hand-curated eval questions, stratified by the reasoning they require.
+#
+# single_hop  — answerable from one message/chunk. Both plain vector RAG and
+#               graph-augmented RAG should do about equally well here; this
+#               stratum is the control group, not where a win is expected.
+# two_hop     — requires connecting two people/entities who are not both named
+#               in any single chunk. Plain vector RAG should struggle; this is
+#               where graph traversal is expected to help once it exists.
+# community   — requires whole-graph structure (clusters, centrality) that no
+#               bounded traversal from a single seed node could produce.
+#
+# expected_chunk_ids is only filled in where the answer is machine-checkable
+# today (single_hop, mostly). two_hop/community entries are placeholders for
+# once the knowledge graph exists — graded by manual read for now, not by
+# retrieval_metrics.py.
+
+- id: q001
+  category: single_hop
+  question: "What did Epstein tell Boris Nikolic about Prince Andrew?"
+  expected_chunk_ids:
+    - HOUSE_OVERSIGHT_030612#0000
+    - HOUSE_OVERSIGHT_030614#0000
+  notes: "Direct email exchange, both messages same thread, 2010-01-28."
+
+- id: q002
+  category: single_hop
+  question: "What project did Marlene Edme propose to Jeffrey Epstein?"
+  expected_chunk_ids:
+    - HOUSE_OVERSIGHT_019446#0001
+  notes: "Haiti garment-industry nonprofit outreach email."
+
+- id: q003
+  category: single_hop
+  question: "What did the Reuters reporter David Ingram ask Martin Weinberg for comment on?"
+  expected_chunk_ids:
+    - HOUSE_OVERSIGHT_031616#0002
+  notes: "Forwarded press-inquiry chain about a 1994 lawsuit."
+
+- id: q004
+  category: single_hop
+  question: "What did Epstein say about Paul Keating's view of leadership?"
+  expected_chunk_ids:
+    - HOUSE_OVERSIGHT_029658#0007
+  notes: "Forwarded Keating interview excerpt."
+
+- id: q005
+  category: single_hop
+  question: "What did Barry Cohen say about organizing documents for Epstein?"
+  expected_chunk_ids:
+    - HOUSE_OVERSIGHT_023208#0124
+  notes: "Reply about bank/art loan docs, org charts, ownership lists."
+
+- id: q101
+  category: two_hop
+  question: "How were Boris Nikolic and Prince Andrew connected, according to this corpus?"
+  expected_chunk_ids: []
+  notes: >
+    Not a single-chunk fact — Nikolic mentions meeting Prince Andrew in an
+    email to Epstein; the connection is Nikolic -> Epstein -> Andrew, not a
+    direct Nikolic/Andrew edge. Good test of whether plain vector RAG
+    conflates "both mentioned nearby" with an actual traced relationship.
+    Grade by manual read until graph RAG exists.
+
+- id: q102
+  category: two_hop
+  question: "Is there any indirect link between the Reuters reporter David Ingram and Boris Nikolic in this corpus?"
+  expected_chunk_ids: []
+  notes: "No known direct edge; tests whether the system correctly says 'no link found' rather than hallucinating one."
+
+- id: q201
+  category: community
+  question: "What distinct groups of contacts appear in Epstein's correspondence (e.g. legal, philanthropy, media)?"
+  expected_chunk_ids: []
+  notes: "Requires clustering over the whole edge set, not a bounded traversal. Not answerable at all pre-graph."
+
+- id: q202
+  category: community
+  question: "Who bridges otherwise-separate groups of contacts in this network?"
+  expected_chunk_ids: []
+  notes: "Betweenness-centrality question. Not answerable at all pre-graph."

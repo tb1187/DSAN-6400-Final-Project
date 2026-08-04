@@ -13,3 +13,7 @@ retrieval:
   index_ids_path: data/processed/chunk_index_ids.parquet
   top_k: 8
   anthropic_model: claude-sonnet-5
+
+evaluation:
+  gold_questions_path: config/eval_questions.yaml
+  recall_at_k: [1, 3, 5, 8]

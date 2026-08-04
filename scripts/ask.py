@@ -36,10 +36,6 @@ def main() -> None:
         print()
         print(result.answer)
         print()
-        print("Sources:")
-        for row in result.sources.itertuples():
-            print(f"  {row.chunk_id}  (p. {row.page_bates_start}-{row.page_bates_end})")
-        print()
 
 
 if __name__ == "__main__":

@@ -13,6 +13,11 @@ import os
 
 os.environ.setdefault("USE_TF", "0")
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+# Once a model is cached, nothing here needs the network — but sentence-transformers
+# still pings Hugging Face to check for updates, which times out on a flaky
+# connection for no benefit. Skip that check; unset HF_HUB_OFFLINE to re-enable it
+# (e.g. the first time a new model name is used and needs downloading).
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 import numpy as np
 
