@@ -9,5 +9,6 @@ pyarrow==23.0.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 PyYAML==6.0.3
+rapidfuzz==3.14.5
 seaborn==0.13.2
 sentence-transformers==5.2.0

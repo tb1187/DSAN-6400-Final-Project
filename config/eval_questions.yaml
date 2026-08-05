@@ -50,22 +50,86 @@
     - HOUSE_OVERSIGHT_023208#0124
   notes: "Reply about bank/art loan docs, org charts, ownership lists."
 
+- id: q006
+  category: one_hop
+  question: "What did Jonathan Farkas write to Jeffrey Epstein about?"
+  expected_chunk_ids:
+    - HOUSE_OVERSIGHT_032388#0000
+  notes: "communicated_with edge, weight=11 (11 messages across 11 docs) — a real, repeated correspondence, not a one-off."
+
+- id: q007
+  category: one_hop
+  question: "What did Epstein say to Peter Thiel about their plans on the 13th?"
+  expected_chunk_ids:
+    - HOUSE_OVERSIGHT_030215#0000
+  notes: "communicated_with edge, weight=7. Subject line on record: 'That was fun, see you in 3 weeks'."
+
+- id: q008
+  category: one_hop
+  question: "What was John Brockman's invitation to Epstein about?"
+  expected_chunk_ids:
+    - HOUSE_OVERSIGHT_023454#0000
+  notes: "communicated_with edge, weight=3. Subject: 'The Edge Annual Question 2012 - Invitation (Confidential)'."
+
+- id: q009
+  category: one_hop
+  question: "What did Lesley Groff remind Epstein about regarding Ed Boyden?"
+  expected_chunk_ids:
+    - HOUSE_OVERSIGHT_028852#0000
+  notes: "Non-hub example (neither party is the Epstein-Groff pair's high-degree node) — subject literally 'Reminder Ed Boyden.'"
+
+- id: q010
+  category: one_hop
+  question: "What did Paul Krassner write to George Krassner and Rebecca Risman about?"
+  expected_chunk_ids:
+    - HOUSE_OVERSIGHT_031973#0000
+  notes: "Non-hub example — family correspondence, unrelated to the Epstein hub entirely."
+
 - id: q101
   category: two_hop
-  question: "How were Boris Nikolic and Prince Andrew connected, according to this corpus?"
+  question: "How is Mark Cohen connected to Jeffrey Epstein in this corpus?"
   expected_chunk_ids: []
   notes: >
-    Not a single-chunk fact — Nikolic mentions meeting Prince Andrew in an
-    email to Epstein; the connection is Nikolic -> Epstein -> Andrew, not a
-    direct Nikolic/Andrew edge. Good test of whether plain vector RAG
-    conflates "both mentioned nearby" with an actual traced relationship.
-    Grade by manual read until graph RAG exists.
+    Mined from the communicated_with graph: Mark Cohen <-> Ghislaine Maxwell
+    (weight=1, doc HOUSE_OVERSIGHT_022247, subject "FW: Ghislaine Maxwell"),
+    Maxwell <-> Epstein (weight=10, docs incl. HOUSE_OVERSIGHT_022245/030600/030745).
+    No direct Cohen-Epstein edge exists. Grade by manual read until graph RAG exists.
 
 - id: q102
   category: two_hop
-  question: "Is there any indirect link between the Reuters reporter David Ingram and Boris Nikolic in this corpus?"
+  question: "How is Joan E. Jacoby connected to Jeffrey Epstein in this corpus?"
   expected_chunk_ids: []
-  notes: "No known direct edge; tests whether the system correctly says 'no link found' rather than hallucinating one."
+  notes: >
+    Mined: Jacoby <-> Ian Osborne (doc HOUSE_OVERSIGHT_030950, subject
+    "Jawbone/Mort"), Osborne <-> Epstein (docs HOUSE_OVERSIGHT_013484/030950).
+    No direct Jacoby-Epstein edge. Grade by manual read until graph RAG exists.
+
+- id: q103
+  category: two_hop
+  question: "Is there a connection between Darren Indyke and Michael Wolff in this corpus, and if so, through whom?"
+  expected_chunk_ids: []
+  notes: >
+    Mined: Indyke <-> Kathy Ruemmler (doc HOUSE_OVERSIGHT_021749, subject re:
+    Epstein prosecutor news article), Ruemmler <-> Wolff (doc HOUSE_OVERSIGHT_030318).
+    No direct Indyke-Wolff edge. Grade by manual read until graph RAG exists.
+
+- id: q104
+  category: two_hop
+  question: "Is there any link between the Reuters reporter David Ingram and Boris Nikolic in this corpus?"
+  expected_chunk_ids: []
+  notes: "No known direct or indirect edge in the mined graph — negative control: tests whether the system correctly says 'no link found' rather than hallucinating one."
+
+- id: q105
+  category: no_path
+  question: "Is there any connection between Ada Clapp and Daniel Schecter in this corpus?"
+  expected_chunk_ids: []
+  notes: "Mined negative control — different connected components in the communicated_with graph. Correct answer is 'no relationship found'."
+
+- id: q106
+  category: no_path
+  question: "Is there any connection between Richard Kahn and Jack Scarola in this corpus?"
+  expected_chunk_ids: []
+  notes: "Mined negative control — different connected components. Correct answer is 'no relationship found'."
 
 - id: q201
   category: community

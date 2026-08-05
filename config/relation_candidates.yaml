@@ -1,0 +1,399 @@
+- category: one_hop
+  a: jeffrey epstein
+  b: steven pfeiffer peggy siegal
+  evidence:
+    weight: 2.0
+    n_docs: 3
+    subjects: 'Re: 2017 IFP Gotham Awards'
+    doc_ids:
+    - HOUSE_OVERSIGHT_026228
+    - HOUSE_OVERSIGHT_028497
+    - HOUSE_OVERSIGHT_031294
+- category: one_hop
+  a: jeffrey epstein
+  b: harry fisch
+  evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: 'Re:'
+    doc_ids:
+    - HOUSE_OVERSIGHT_019218
+- category: one_hop
+  a: jeffrey epstein
+  b: greg
+  evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: Term Sheet
+    doc_ids:
+    - HOUSE_OVERSIGHT_032725
+- category: one_hop
+  a: jeffrey epstein
+  b: gerald barton
+  evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: 'Re:'
+    doc_ids:
+    - HOUSE_OVERSIGHT_032256
+- category: one_hop
+  a: jeffrey epstein
+  b: jonathan farkas
+  evidence:
+    weight: 11.0
+    n_docs: 11
+    subjects: 'Re:'
+    doc_ids:
+    - HOUSE_OVERSIGHT_026942
+    - HOUSE_OVERSIGHT_032388
+    - HOUSE_OVERSIGHT_032530
+- category: one_hop
+  a: jeffrey epstein
+  b: jide zeitlin
+  evidence:
+    weight: 4.0
+    n_docs: 4
+    subjects: 'Re: Sultan Bin Sulayem'
+    doc_ids:
+    - HOUSE_OVERSIGHT_030954
+    - HOUSE_OVERSIGHT_033374
+    - HOUSE_OVERSIGHT_033375
+- category: one_hop
+  a: jeffrey epstein
+  b: david schoen
+  evidence:
+    weight: 5.0
+    n_docs: 5
+    subjects: 'Jerrold Nadler''s investigation seems rigged to me: Why are two leading
+      Trump foes heading up his probe? - New; Mueller''s Star Witness Against Trump
+      Once Arrested For Child Porn, Hung Out With Pedos Cl'
+    doc_ids:
+    - HOUSE_OVERSIGHT_031344
+    - HOUSE_OVERSIGHT_031775
+    - HOUSE_OVERSIGHT_031823
+- category: one_hop
+  a: jeffrey epstein
+  b: peter thiel
+  evidence:
+    weight: 7.0
+    n_docs: 6
+    subjects: Re:; That was fun , see you in 3 weeks
+    doc_ids:
+    - HOUSE_OVERSIGHT_030215
+    - HOUSE_OVERSIGHT_031569
+    - HOUSE_OVERSIGHT_032827
+- category: one_hop
+  a: jeffrey epstein
+  b: john brockman
+  evidence:
+    weight: 3.0
+    n_docs: 3
+    subjects: 'Re: The Edge Annual Question 2012 - Invitation (Confidential); Edge
+      Question 2011 - An Invitation; sorry I missed your call'
+    doc_ids:
+    - HOUSE_OVERSIGHT_023454
+    - HOUSE_OVERSIGHT_029901
+    - HOUSE_OVERSIGHT_030430
+- category: one_hop
+  a: lesley groff
+  b: ed boyden
+  evidence:
+    weight: 2.0
+    n_docs: 2
+    subjects: 'Re: deception; Re: Your CITICAR Confirmation'
+    doc_ids:
+    - HOUSE_OVERSIGHT_028852
+    - HOUSE_OVERSIGHT_029324
+- category: one_hop
+  a: paul krassner
+  b: george krassner
+  evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: rather long and a few typos
+    doc_ids:
+    - HOUSE_OVERSIGHT_031973
+- category: one_hop
+  a: jeffrey epstein
+  b: roger schank
+  evidence:
+    weight: 2.0
+    n_docs: 2
+    subjects: 'Re: on another subject... gates and ed'
+    doc_ids:
+    - HOUSE_OVERSIGHT_030483
+    - HOUSE_OVERSIGHT_030484
+- category: two_hop
+  a: jeffrey epstein
+  b: mark cohen
+  via: ghislaine maxwell
+  a_via_evidence:
+    weight: 10.0
+    n_docs: 7
+    subjects: 'Re:; Re: FW: Prince Andrew at Heidi Klum''s ''Hookers and Pimps'' party
+      with Ghislaine Maxwell | Daily Mail Online [IWOV-Matters.FID782702]'
+    doc_ids:
+    - HOUSE_OVERSIGHT_022245
+    - HOUSE_OVERSIGHT_030600
+    - HOUSE_OVERSIGHT_030745
+  via_b_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: 'FW: Ghislaine Maxwell'
+    doc_ids:
+    - HOUSE_OVERSIGHT_022247
+- category: two_hop
+  a: mark cohen
+  b: philip barden
+  via: ghislaine maxwell
+  a_via_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: 'FW: Ghislaine Maxwell'
+    doc_ids:
+    - HOUSE_OVERSIGHT_022247
+  via_b_evidence:
+    weight: 2.0
+    n_docs: 1
+    subjects: 'Re:'
+    doc_ids:
+    - HOUSE_OVERSIGHT_030295
+- category: two_hop
+  a: paul schulte 1
+  b: gino yu
+  via: paul schulte
+  a_via_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: 'Schulte Research: Deep dives into PRC fin tech ownership and Trump
+      cabinet ownership. (DO'
+    doc_ids:
+    - HOUSE_OVERSIGHT_026041
+  via_b_evidence:
+    weight: 1.0
+    n_docs: 2
+    subjects: 'Re: Schulte Research: Deep dives into PRC fin tech ownership and Trump
+      cabinet'
+    doc_ids:
+    - HOUSE_OVERSIGHT_026036
+    - HOUSE_OVERSIGHT_026041
+- category: two_hop
+  a: jr stambaugh
+  b: scott stambau jr stambaugh
+  via: guy amico
+  a_via_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: Photos
+    doc_ids:
+    - HOUSE_OVERSIGHT_026548
+  via_b_evidence:
+    weight: 2.0
+    n_docs: 2
+    subjects: Photos
+    doc_ids:
+    - HOUSE_OVERSIGHT_026548
+    - HOUSE_OVERSIGHT_033491
+- category: two_hop
+  a: scott stambau jr stambaugh
+  b: larry visoski
+  via: guy amico
+  a_via_evidence:
+    weight: 2.0
+    n_docs: 2
+    subjects: Photos
+    doc_ids:
+    - HOUSE_OVERSIGHT_026548
+    - HOUSE_OVERSIGHT_033491
+  via_b_evidence:
+    weight: 3.0
+    n_docs: 3
+    subjects: Photos
+    doc_ids:
+    - HOUSE_OVERSIGHT_026548
+    - HOUSE_OVERSIGHT_033491
+    - HOUSE_OVERSIGHT_033495
+- category: two_hop
+  a: joan e jacoby
+  b: jeffrey epstein
+  via: ian osborne
+  a_via_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: Jawbone/Mort
+    doc_ids:
+    - HOUSE_OVERSIGHT_030950
+  via_b_evidence:
+    weight: 2.0
+    n_docs: 2
+    subjects: 'Fwd: Invite to Dialog 2014 (16 months away); Re: Jawbone/Mort'
+    doc_ids:
+    - HOUSE_OVERSIGHT_013484
+    - HOUSE_OVERSIGHT_030950
+- category: two_hop
+  a: ian ian maxwell
+  b: brian basham
+  via: gmax
+  a_via_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: 'Re: Daily Mail'
+    doc_ids:
+    - HOUSE_OVERSIGHT_030229
+  via_b_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: 'Re: Daily Mail'
+    doc_ids:
+    - HOUSE_OVERSIGHT_030229
+- category: two_hop
+  a: brian basham
+  b: mark cohen
+  via: gmax
+  a_via_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: 'Re: Daily Mail'
+    doc_ids:
+    - HOUSE_OVERSIGHT_030229
+  via_b_evidence:
+    weight: 2.0
+    n_docs: 5
+    subjects: 'FW: Ghislaine Maxwell; Ghislaine Maxwell'
+    doc_ids:
+    - HOUSE_OVERSIGHT_023030
+    - HOUSE_OVERSIGHT_023038
+    - HOUSE_OVERSIGHT_023041
+- category: two_hop
+  a: ross gow
+  b: mark cohen
+  via: gmax
+  a_via_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: 'Re: Daily Mail'
+    doc_ids:
+    - HOUSE_OVERSIGHT_030222
+  via_b_evidence:
+    weight: 2.0
+    n_docs: 5
+    subjects: 'FW: Ghislaine Maxwell; Ghislaine Maxwell'
+    doc_ids:
+    - HOUSE_OVERSIGHT_023030
+    - HOUSE_OVERSIGHT_023038
+    - HOUSE_OVERSIGHT_023041
+- category: two_hop
+  a: philip barden
+  b: jeffrey epstein
+  via: gmax
+  a_via_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: Prince Andrew at Heidi Klum's 'Hookers and Pimps' party with Ghislaine
+      Maxwell | Daily Mail Online [IWOV-Matters.FID782702]
+    doc_ids:
+    - HOUSE_OVERSIGHT_030600
+  via_b_evidence:
+    weight: 6.0
+    n_docs: 13
+    subjects: 'FW: Ghislaine Maxwell; FW: Daily Mail; Re: Daily Mail; +1 more'
+    doc_ids:
+    - HOUSE_OVERSIGHT_023030
+    - HOUSE_OVERSIGHT_023032
+    - HOUSE_OVERSIGHT_023038
+- category: two_hop
+  a: darren k indyke
+  b: michael wolff
+  via: kathy ruemmler
+  a_via_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: 'Re: Epstein prosecutor was rebuked for prior child sex case I Miami
+      Herald'
+    doc_ids:
+    - HOUSE_OVERSIGHT_021749
+  via_b_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: 'Re:'
+    doc_ids:
+    - HOUSE_OVERSIGHT_030318
+- category: two_hop
+  a: martin g weinberg
+  b: michael wolff
+  via: kathy ruemmler
+  a_via_evidence:
+    weight: 4.0
+    n_docs: 4
+    subjects: 'ATTORNEY-CLIENT PRIVILEGE; ATTORNEY- CLIENT PRIVILEGE; Re: ATTORNEY-CLIENT
+      PRIVILEGE'
+    doc_ids:
+    - HOUSE_OVERSIGHT_022926
+    - HOUSE_OVERSIGHT_022931
+    - HOUSE_OVERSIGHT_025879
+  via_b_evidence:
+    weight: 1.0
+    n_docs: 1
+    subjects: 'Re:'
+    doc_ids:
+    - HOUSE_OVERSIGHT_030318
+- category: no_path
+  a: charlotte abrams
+  b: glick jamie
+  note: different connected components in the communicated_with graph — no path should
+    be found
+- category: no_path
+  a: ada clapp
+  b: daniel schecter
+  note: different connected components in the communicated_with graph — no path should
+    be found
+- category: no_path
+  a: ed boyden
+  b: grant j smith
+  note: different connected components in the communicated_with graph — no path should
+    be found
+- category: no_path
+  a: lesley groff
+  b: william daniel danny
+  note: different connected components in the communicated_with graph — no path should
+    be found
+- category: no_path
+  a: alexandra wolfe
+  b: adelson v harris
+  note: different connected components in the communicated_with graph — no path should
+    be found
+- category: no_path
+  a: alexander haig
+  b: lisa rossi
+  note: different connected components in the communicated_with graph — no path should
+    be found
+- category: no_path
+  a: c
+  b: dave hope
+  note: different connected components in the communicated_with graph — no path should
+    be found
+- category: no_path
+  a: nancy cain
+  b: susan edelman
+  note: different connected components in the communicated_with graph — no path should
+    be found
+- category: no_path
+  a: richard kahn
+  b: jack scarola
+  note: different connected components in the communicated_with graph — no path should
+    be found
+- category: no_path
+  a: w
+  b: bob hope
+  note: different connected components in the communicated_with graph — no path should
+    be found
+- category: no_path
+  a: el hachem johnny
+  b: pj wine
+  note: different connected components in the communicated_with graph — no path should
+    be found
+- category: no_path
+  a: steven pfeiffer
+  b: david pegg
+  note: different connected components in the communicated_with graph — no path should
+    be found

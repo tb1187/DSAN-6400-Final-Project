@@ -30,7 +30,10 @@ class Embedder:
         from sentence_transformers import SentenceTransformer
 
         self.model_name = model_name
-        self._model = SentenceTransformer(model_name)
+        # This model is small enough that CPU is plenty fast, and the GPU on
+        # this box has thrown intermittent "CUDA error: unknown error" —
+        # forcing CPU avoids that flakiness entirely.
+        self._model = SentenceTransformer(model_name, device="cpu")
 
     @property
     def dim(self) -> int:

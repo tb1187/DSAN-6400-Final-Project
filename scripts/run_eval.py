@@ -1,14 +1,16 @@
-"""Run the retrieval eval suite and print a report.
+"""Run the eval suite and print a report.
 
 Usage:
     python scripts/run_eval.py [--config config/config.yaml] [--skip-generation]
 
 Runs, in order:
-  1. Recall@k / MRR against the gold question set (single_hop questions only —
-     two_hop/community questions are listed but not machine-scored yet).
-  2. Self-retrieval and paraphrase-stability sanity checks (label-free).
-  3. Faithfulness check on a live RAGPipeline answer for each gold question
-     (needs ANTHROPIC_API_KEY; skip with --skip-generation).
+  1. Self-retrieval and paraphrase-stability sanity checks (label-free).
+  2. Faithfulness check on a live RAGPipeline answer for each single_hop gold
+     question (needs ANTHROPIC_API_KEY; skip with --skip-generation).
+
+two_hop/community gold questions have no single retrievable answer to check
+against, so they're listed for manual read rather than machine-scored — see
+config/eval_questions.yaml.
 """
 
 from __future__ import annotations
@@ -25,11 +27,6 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.evaluation.faithfulness import check_faithfulness  # noqa: E402
 from src.evaluation.gold_set import load_gold_set  # noqa: E402
-from src.evaluation.retrieval_metrics import (  # noqa: E402
-    evaluate_retrieval,
-    mean_reciprocal_rank,
-    recall_at_k,
-)
 from src.evaluation.sanity_checks import paraphrase_stability_check, self_retrieval_check  # noqa: E402
 from src.retrieval.retriever import Retriever  # noqa: E402
 
@@ -51,19 +48,10 @@ def main() -> None:
     print("Loading retriever...")
     retriever = Retriever(args.config)
 
-    print("\n=== Retrieval metrics (single_hop, machine-checkable) ===")
-    results = evaluate_retrieval(retriever, checkable, max_k=max(eval_cfg["recall_at_k"]))
-    for k in eval_cfg["recall_at_k"]:
-        print(f"  Recall@{k:<2} {recall_at_k(results, k):.2f}")
-    print(f"  MRR      {mean_reciprocal_rank(results):.2f}")
-    for r in results:
-        status = "HIT " if r.hit_ranks else "MISS"
-        print(f"  [{status}] {r.question.id}: {r.question.question}")
-
     if unchecked:
-        print(f"\n  ({len(unchecked)} two_hop/community questions not scored — grade by manual read)")
+        print(f"\n=== Not machine-scored ({len(unchecked)} two_hop/community questions — grade by manual read) ===")
         for q in unchecked:
-            print(f"    {q.id} [{q.category}]: {q.question}")
+            print(f"  {q.id} [{q.category}]: {q.question}")
 
     print("\n=== Sanity checks (label-free) ===")
     chunks = pd.read_parquet(processed / "chunks.parquet")
