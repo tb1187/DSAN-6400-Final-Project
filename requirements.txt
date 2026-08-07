@@ -1,14 +1,39 @@
+# Core pipeline: ingestion, extraction, resolution, graph construction.
+# Versions pinned to what the pipeline was actually run on.
 anthropic==0.120.2
-faiss-cpu==1.14.3
-ipykernel==6.29.5
-matplotlib==3.10.8
-networkx==3.6.1
-numpy==2.3.0
-pandas==2.3.0
-pyarrow==23.0.1
+numpy==2.3.2
+pandas==2.3.2
+pyarrow==23.0.1            # pandas parquet engine; not imported directly
 python-dateutil==2.9.0.post0
-python-dotenv==1.2.2
+python-dotenv==1.0.1
 PyYAML==6.0.3
-rapidfuzz==3.14.5
-seaborn==0.13.2
+rapidfuzz==3.14.5          # fuzzy matching in entity resolution
+
+# Entity extraction. The model is a separate download, see below.
+spacy==3.8.14
+
+# Network analysis and visualisation.
+networkx==3.5
+matplotlib==3.10.6
+scikit-learn==1.7.2
+pyvis                      # interactive network view; version unpinned
+
+# Retrieval (RAG arm). These pull in PyTorch, which is by far the largest
+# install. On Linux, prefer the CPU-only wheel index or pip fetches ~2.5 GB of
+# CUDA libraries you do not need:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
 sentence-transformers==5.2.0
+faiss-cpu==1.14.3
+
+# Notebooks.
+ipykernel>=6.29
+
+# ---------------------------------------------------------------------------
+# Not installable from this file:
+#
+#   spaCy model (required by the extraction pipeline):
+#       python -m spacy download en_core_web_lg      # v3.8.0
+#
+#   Quarto (required only to render docs/6400-Final-Report.qmd):
+#       https://quarto.org/docs/get-started/
+# ---------------------------------------------------------------------------

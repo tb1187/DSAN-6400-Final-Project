@@ -293,8 +293,6 @@ def extract_hybrid(
 
 def estimate_cost(chunks: pd.DataFrame, input_rate: float, output_rate: float) -> dict:
     """Rough token and dollar estimate before spending anything."""
-    import tiktoken  # noqa: F401  (only used for a rough character heuristic)
-
     chars = int(chunks["text"].str.len().sum())
     prompt_tokens = len(chunks) * (len(SYSTEM_PROMPT) // 4) + chars // 4
     output_tokens = len(chunks) * 300
