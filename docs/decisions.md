@@ -57,19 +57,68 @@ See `src/extraction/schema.py::chunk_offsets`.
 | 2 — statistical | spaCy NER over chunks | PERSON / ORG / GPE nodes |
 | 3 — rules | patterns over chunks | `represented by`, `employed by` |
 
-Tier 1 gives 4,039 header blocks across 2,208 documents → 3,248 distinct messages,
-4,088 sender→recipient edges, 984 actors, 97% with an exact page citation. The
-load file itself tags only **64** emails; the rest are printed-to-PDF emails whose
-headers survive in the OCR text. Do not build the communication network from
-load-file metadata.
+Tier 1 gives 4,039 header blocks across 2,208 documents → 3,248 distinct messages.
+Of those, 2,704 carry both a sender and a recipient and so produce edges: **4,050
+sender→recipient rows over 1,988 documents, 985 actors**, 97% with an exact page
+citation. The load file itself tags only **64** emails; the rest are
+printed-to-PDF emails whose headers survive in the OCR text. Do not build the
+communication network from load-file metadata.
 
-Weight edges by `nunique(message_key)`, not row count — 397 messages appear in more
+Weight edges by `nunique(message_key)`, not row count — 298 messages appear in more
 than one document as forwarded copies, one of them 11 times.
+
+### Entity resolution — how the nodes are made
+
+91,100 distinct `(surface, type)` pairs → **81,112 entities**; with email actors
+and threads added, **81,796 nodes and 113,613 edges**. 83% of surface forms needed
+no merging; only 9.3% of entities have more than one alias, but those carry **46%
+of all mentions**. Effort belongs in the head.
+
+The errors are asymmetric. Under-merging fragments a person across nodes and is
+*visible*. Over-merging invents relationships and is not. Every threshold below
+is set on that asymmetry, so **loosening one to "improve" recall is the wrong
+instinct**:
+
+| choice | value | why |
+|---|---|---|
+| person similarity | 88 | with a compatible given name required — string similarity alone merges `Mark Epstein` into `Jeffrey Epstein` |
+| ORG / GPE similarity | 94 | org names legitimately share tokens (`Bank of America` / `Bank of the West`) |
+| ORG / GPE blocking key | despaced 4-char prefix | on a naive key `u s` and `us` were separate entities |
+| address OCR variants | blocked on `local[-5:]` | OCR corrupts the *leading* character and the domain both (`jeevacation` / `eevacation` / `@qmail.com`) |
+| `(name, address)` support | ≥ 2 observations | see below |
+
+**Bare surnames attach; bare given names do not.** `epstein` alone is 15,003 of
+Jeffrey Epstein's 24,678 mentions — 61% — so refusing the attachment throws away
+most of the data. But attachment prefers same-document evidence and falls back to
+corpus-wide dominance **only for surnames**. An earlier version treated given
+names the same way and absorbed `steve` and a garbled `steven pfeiffer jeffrey e`
+into Steve Bannon's node, carrying Epstein's email address onto it. Hence also:
+an address never attaches on a fuzzy name match, and needs two independent
+observations.
+
+The cost is that `jeffrey` (2,247 mentions) stays a separate node from `jeffrey
+epstein`, and the two show a strong co-mention edge to each other. That is the
+policy working, not failing — but hand-merge it before publishing a figure.
+
+**Canonical form is never a salutation.** The picker takes the most-mentioned
+member preferring a multi-token name, which let `dear jeffrey` (60) outrank
+`jeffrey` (2,187) and named 30 nodes after a greeting.
+
+**Residual error runs both ways** and should be reported rather than hidden:
+`jane doe v epstein` (a case caption) merged *into* the Epstein node, while
+`epstein jeffrey` stayed *out* of it.
+
+> **`entity_id` is positional** — assigned by sort order inside `resolve()`. Any
+> upstream change renumbers every entity, so `entities.parquet` and
+> `edges.parquet` must be regenerated in the same pass. This is why both are
+> tracked in git (§7): a copy passed around out-of-band cannot tell you it has
+> gone stale.
 
 ### Tier 1 — resolving actors onto entities
 
-984 email actors → 60% link to an NER entity (36 by address, 512 by exact name,
-19 reordered, 16 via display name). The remaining 387 are **minted** as
+971 email actors reach resolution (985 parsed, less those appearing only in the
+routing blocks dropped below) → 60% link to an NER entity: 36 by address, 511 by
+exact name, 20 reordered, 16 via display name. The remaining 388 are **minted** as
 `EML_*` nodes rather than dropped: NER failing to find a name is not evidence
 that the correspondence did not happen, and dropping those edges would thin the
 network silently. They hold 18% of message volume. `nodes.source` says which.
@@ -88,7 +137,7 @@ Two artefacts worth knowing about:
   string spaCy read as one person). The address goes to its dominant claimant.
 * **FBI teletype routing blocks.** `FROM: MIAMI / TO: DIRECTOR / ATTN: SSA`
   parses like an email header but its actors are field offices. Rows carrying no
-  address, subject *or* timestamp are dropped: 18 of 4,088, across 6 documents.
+  address, subject *or* timestamp are dropped: 18 of 4,050, across 6 documents.
   Left in, `miami` ranked third by betweenness. `miami` and `1` still appear in
   the top ten — residual rows that do carry a subject. Flag them before reporting
   centrality.
@@ -160,7 +209,7 @@ chunking copies a message's header onto every one of its body chunks, so countin
 them multiplies one header's co-occurrences by the message's chunk count — and
 tier 1 covers that layer deterministically anyway.
 
-Result: 110,109 edges over 12,842 entities. **NPMI's top ranks are boilerplate** —
+Result: 110,701 edges over 12,864 entities. **NPMI's top ranks are boilerplate** —
 letterheads and bank disclosures score 1.0 because they only ever appear together.
 That is the metric behaving correctly on repeated text, not a bug; rank by
 `n_chunks` for reporting, and read NPMI as a filter rather than an importance
@@ -178,18 +227,42 @@ under-represented. `noisy/sparse` had only 3 documents in the frame and was drop
 
 Per-stratum floors mean the sample is **not** corpus-representative — `clean/prose`
 is 92% of the frame but 43% of the sample. Report the per-stratum table as the
-primary result and the post-stratified estimate for corpus-level claims.
+primary result and the post-stratified estimate for population-level claims.
 
-**Results** (corpus-weighted F1): llm **0.781**, hybrid **0.772**, spacy **0.719**.
-The gap is concentrated in ORG precision (spacy 0.642, llm 0.785). Untyped scores
-are much closer — spaCy finds the entities and mislabels them.
+**Call it frame-weighted, not corpus-weighted.** It estimates the 150–1,500 word
+band — 1,772 of 2,897 documents, **61% of the corpus** — with `noisy/sparse`
+dropped. Two further caveats belong with the number: `clean/prose` carries
+**W = 0.921**, so the weighted estimate *is* the `clean/prose` estimate to within
+0.003; and the **effective sample size is 17.5 documents** (design effect 2.0)
+against 35 sampled. Report two decimals, not three.
+
+**Results** (frame-weighted F1): llm **0.78**, hybrid **0.77**, spacy **0.72**.
+
+> **Do not rank llm above hybrid.** They differ by 0.009, which is smaller than
+> the ±0.017 this same set varies by across the disagreement-resolution rules
+> below. The defensible claim is **llm ≈ hybrid > spacy**. (Pooled, unweighted,
+> the gap is larger at 0.046 — which is exactly why it cannot be asserted.)
+
+spaCy's deficit is in **precision, not recall**. ORG is the hardest type for every
+system — none exceeds 0.66 F1 (spacy 0.617, hybrid 0.638, llm 0.653) — and spaCy's
+ORG precision is 0.642 against llm's 0.785. Note the *F1* gap is actually widest
+in GPE (+0.108) rather than ORG (+0.036); it is the **precision** gap that
+concentrates in ORG and GPE. Untyped scores are much closer across systems —
+spaCy finds the entities and mislabels them.
 
 The hybrid is *candidate-guided*, not validate-only: the model may confirm, correct,
 reject **and add**. Of its output, 674 confirmed / 274 corrected / **177 added**.
 A validate-only hybrid could not exceed spaCy's recall by construction.
 
 **Independent probe.** Email-header names give ground truth that owes nothing to the
-pool: spacy 0.741, llm 0.845, hybrid 0.776 (n=58).
+pool: spacy **0.724**, llm **0.862**, hybrid **0.793** (n=58). Same ordering as the
+adjudicated result, obtained without the labels.
+
+> These moved from 0.741 / 0.845 / 0.776 when the header parser stopped splitting
+> `Thomas Jr., Landon` into two recipients. Re-run `score_extraction.py --save
+> results/scores` after any ingestion change; the figure in
+> `results/figures/12_extraction_f1.png` is generated from those CSVs and will
+> otherwise disagree with the text.
 
 ---
 
@@ -217,10 +290,14 @@ one-directional: 48 of 56 were one annotator accepting what the other rejected.
 Not reconciled — a deliberate scoping decision for a course project.
 
 Absolute figures are therefore approximate: per-system precision differed by 10–17
-points between the two annotators' document sets. The **ranking** is stable —
-identical under strict, lenient and exclusion resolution (F1 varying ≤ 0.017,
-`--disagreements`) and within each annotator's documents. Report the ranking as the
-finding; treat absolute values as indicative.
+points between the two annotators' document sets. What is stable is **both LLM
+arms placing above spaCy** — that holds under strict, lenient and exclusion
+resolution and within each annotator's documents.
+
+What is *not* stable is the order of llm and hybrid. F1 varies by up to 0.017
+across those resolution rules, and the two arms are 0.009 apart on the
+frame-weighted estimate. Report **llm ≈ hybrid > spacy**; treat absolute values as
+indicative.
 
 ---
 

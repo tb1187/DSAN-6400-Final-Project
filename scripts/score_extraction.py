@@ -185,7 +185,13 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default=REPO_ROOT / "data" / "processed")
     ap.add_argument("--sheets", default=REPO_ROOT / "results" / "adjudication")
+    ap.add_argument(
+        "--save",
+        default=None,
+        help="directory to write the result tables to as CSV, for figures and the paper",
+    )
     args = ap.parse_args()
+    tables: dict[str, pd.DataFrame] = {}
 
     out, sheets = Path(args.out), Path(args.sheets)
     key = pd.read_csv(sheets / "pool_key.csv", dtype={"pool_id": str})
@@ -230,14 +236,16 @@ def main() -> None:
     for system, frame in mentions.items():
         preds = set(frame[["doc_id", "norm", "type"]].itertuples(index=False, name=None))
         rows.append({"system": system, **score(preds, gold_typed)})
-    print(pd.DataFrame(rows).round(3).to_string(index=False))
+    tables["typed"] = pd.DataFrame(rows)
+    print(tables["typed"].round(3).to_string(index=False))
 
     print("\n== untyped (span only) ==")
     rows = []
     for system, frame in mentions.items():
         preds = {(d, n) for d, n, _ in frame[["doc_id", "norm", "type"]].itertuples(index=False)}
         rows.append({"system": system, **score(preds, gold_untyped)})
-    print(pd.DataFrame(rows).round(3).to_string(index=False))
+    tables["untyped"] = pd.DataFrame(rows)
+    print(tables["untyped"].round(3).to_string(index=False))
 
     print("\n== typed, by entity type ==")
     rows = []
@@ -247,7 +255,8 @@ def main() -> None:
             g = {x for x in gold_typed if x[2] == type_}
             p = {x for x in preds if x[2] == type_}
             rows.append({"system": system, "type": type_, **score(p, g)})
-    print(pd.DataFrame(rows).round(3).to_string(index=False))
+    tables["by_type"] = pd.DataFrame(rows)
+    print(tables["by_type"].round(3).to_string(index=False))
 
     print("\n== typed, by stratum ==")
     rows = []
@@ -259,7 +268,7 @@ def main() -> None:
             p = {x for x in preds if x[0] in docs}
             if g or p:
                 rows.append({"system": system, "stratum": stratum, **score(p, g)})
-    by_stratum = pd.DataFrame(rows)
+    by_stratum = tables["by_stratum"] = pd.DataFrame(rows)
     print(by_stratum.round(3).to_string(index=False))
 
     print("\n== corpus-weighted estimate (post-stratified) ==")
@@ -282,10 +291,12 @@ def main() -> None:
                 "strata": len(group),
             }
         )
-    print(pd.DataFrame(weighted).round(3).to_string(index=False))
+    tables["corpus_weighted"] = pd.DataFrame(weighted)
+    print(tables["corpus_weighted"].round(3).to_string(index=False))
 
     probe = header_probe(out, mentions)
     if not probe.empty:
+        tables["header_probe"] = probe
         print("\n== email-header recall probe (independent of the pool) ==")
         print(probe.round(3).to_string(index=False))
 
@@ -299,6 +310,13 @@ def main() -> None:
         for system, count in unlocated.items():
             if count:
                 print(f"  {system:<8} {count:>5,}")
+
+    if args.save:
+        target = Path(args.save)
+        target.mkdir(parents=True, exist_ok=True)
+        for name, frame in tables.items():
+            frame.to_csv(target / f"{name}.csv", index=False)
+        print(f"\nwrote {len(tables)} table(s) to {target}")
 
 
 if __name__ == "__main__":
