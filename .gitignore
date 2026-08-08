@@ -44,6 +44,13 @@ results/*
 !results/figures/
 results/figures/*
 !results/figures/.gitkeep
+# Figures used by the report, and the scorer tables the extraction chart is
+# generated from. ~1.2 MB, and without them docs/6400-Final-Report.qmd cannot
+# be rendered from a fresh clone.
+!results/figures/*.png
+!results/scores/
+results/scores/*
+!results/scores/*.csv
 
 # The adjudication is the one thing in this repo that cannot be regenerated at
 # any price — roughly 1,568 human judgements. git cannot re-include a file whose
