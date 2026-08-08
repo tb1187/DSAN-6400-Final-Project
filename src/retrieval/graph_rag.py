@@ -18,7 +18,7 @@ import pandas as pd
 
 from src.knowledge_graph.graph_store import GraphStore, load_graph_store
 from src.knowledge_graph.render import render_connection, render_exploration
-from src.knowledge_graph.traversal import EdgeFact, TwoHopFact, explore, find_connection
+from src.knowledge_graph.traversal import EdgeFact, TwoHopFact, explore, find_all_connections
 
 from .rag import REPO_ROOT, RAGPipeline, _format_context
 
@@ -55,22 +55,24 @@ class GraphAugmentedRAGPipeline(RAGPipeline):
         self.graph_store = graph_store or load_graph_store(REPO_ROOT / "data" / "processed")
 
     def _graph_context(self, query: str) -> tuple[str, list[EdgeFact]]:
-        """Rendered relationship text, plus the edges it's built from.
+        """Rendered relationship text, plus the edges to pull document evidence for.
 
-        The edges are returned too so their real evidence documents can be
-        pulled into the excerpt list alongside the normally-retrieved chunks
-        — the rendered sentence cites a doc_id, but doesn't put that
-        document's actual text in front of the model on its own.
+        Every path between two named entities gets described in the text —
+        that's cheap. Only the *shortest* path's edges are returned for
+        evidence-chunk lookup, since attaching real document text for every
+        path found would grow unbounded for a well-connected pair; see
+        ``ConnectionResult.shortest``.
         """
         entity_ids = self.graph_store.match_entities(query)
         if len(entity_ids) >= 2:
             a, b = entity_ids[0], entity_ids[1]
-            result = find_connection(self.graph_store, a, b)
+            result = find_all_connections(self.graph_store, a, b)
             text = render_connection(self.graph_store, a, b, result)
-            if isinstance(result, EdgeFact):
-                return text, [result]
-            if isinstance(result, TwoHopFact):
-                return text, [result.edge_a_via, result.edge_via_b]
+            shortest = result.shortest
+            if isinstance(shortest, EdgeFact):
+                return text, [shortest]
+            if isinstance(shortest, TwoHopFact):
+                return text, [shortest.edge_a_via, shortest.edge_via_b]
             return text, []
         if len(entity_ids) == 1:
             direct, two_hop = explore(self.graph_store, entity_ids[0])

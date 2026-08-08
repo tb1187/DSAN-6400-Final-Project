@@ -2,15 +2,19 @@
 
 Two query shapes are handled differently, deliberately:
 
-* **Two named entities** ("how is X connected to Y") — :func:`find_connection`
-  looks for the specific path between exactly those two nodes: a direct edge
-  first, else the single best common neighbor. This is the shape almost all
-  of the corpus's real relational questions take.
+* **Two named entities** ("how is X connected to Y") — :func:`find_all_connections`
+  finds *every* path between exactly those two nodes (a direct edge, plus every
+  common-neighbor 2-hop path), not just the single best one. This is the shape
+  almost all of the corpus's real relational questions take.
 * **One named entity** ("who does X talk to") — :func:`explore` fans out from
   that one seed instead, since there's no second endpoint to path toward.
 
-Both cap what they return and rank by edge weight (communication frequency),
-so a high-degree hub node doesn't dump dozens of facts into the prompt.
+Reporting many paths as text is cheap, but attaching real chunk text for each
+one isn't — see ``ConnectionResult.shortest`` and how callers use it (only
+the graph_rag pipeline pulls document evidence, and only for the shortest
+path, even though every path found gets described). Everything here still
+caps what it returns and ranks by edge weight (communication frequency), so a
+high-degree hub node doesn't dump hundreds of facts into the prompt.
 """
 
 from __future__ import annotations
@@ -43,6 +47,30 @@ class TwoHopFact:
     edge_via_b: EdgeFact
 
 
+@dataclass(frozen=True)
+class ConnectionResult:
+    direct: EdgeFact | None
+    two_hop_paths: list[TwoHopFact]  # every common-neighbor path found, ranked by weight desc
+
+    @property
+    def shortest(self) -> EdgeFact | TwoHopFact | None:
+        """The single path evidence chunks should be pulled for.
+
+        A direct edge is always shortest when one exists. Otherwise the
+        best-ranked 2-hop path — there's no way to prefer among ties at the
+        same hop count other than weight, so highest-weight wins.
+        """
+        if self.direct:
+            return self.direct
+        if self.two_hop_paths:
+            return self.two_hop_paths[0]
+        return None
+
+    @property
+    def found(self) -> bool:
+        return self.direct is not None or bool(self.two_hop_paths)
+
+
 def _edge_fact(store: GraphStore, a: str, b: str) -> EdgeFact | None:
     row = store.edges[
         ((store.edges["src"] == a) & (store.edges["dst"] == b))
@@ -72,28 +100,35 @@ def direct_edges(store: GraphStore, entity_id: str, limit: int = DEFAULT_LIMIT) 
     return facts
 
 
-def find_connection(store: GraphStore, a_id: str, b_id: str) -> EdgeFact | TwoHopFact | None:
-    """The path between two specific entities: direct edge, else best 2-hop, else None."""
+def find_all_connections(
+    store: GraphStore, a_id: str, b_id: str, max_two_hop: int = DEFAULT_LIMIT
+) -> ConnectionResult:
+    """Every path between two specific entities: the direct edge (if any),
+    plus every common-neighbor 2-hop path, ranked by weight and capped at
+    ``max_two_hop``. A direct edge doesn't suppress 2-hop paths from being
+    reported too — "they email directly, and also both know Z" is real,
+    useful context — it only affects which path is ``.shortest``.
+    """
     if a_id not in store.graph or b_id not in store.graph:
-        return None
+        return ConnectionResult(direct=None, two_hop_paths=[])
 
     direct = _edge_fact(store, a_id, b_id)
-    if direct:
-        return direct
 
     common = set(store.graph.neighbors(a_id)) & set(store.graph.neighbors(b_id))
-    if not common:
-        return None
-
-    best_via = max(
+    ranked_vias = sorted(
         common,
         key=lambda z: store.graph[a_id][z]["weight"] * store.graph[z][b_id]["weight"],
+        reverse=True,
     )
-    edge_a_via = _edge_fact(store, a_id, best_via)
-    edge_via_b = _edge_fact(store, best_via, b_id)
-    if not edge_a_via or not edge_via_b:
-        return None
-    return TwoHopFact(a=a_id, via=best_via, b=b_id, edge_a_via=edge_a_via, edge_via_b=edge_via_b)
+
+    two_hop: list[TwoHopFact] = []
+    for z in ranked_vias[:max_two_hop]:
+        edge_a_via = _edge_fact(store, a_id, z)
+        edge_via_b = _edge_fact(store, z, b_id)
+        if edge_a_via and edge_via_b:
+            two_hop.append(TwoHopFact(a=a_id, via=z, b=b_id, edge_a_via=edge_a_via, edge_via_b=edge_via_b))
+
+    return ConnectionResult(direct=direct, two_hop_paths=two_hop)
 
 
 def explore(store: GraphStore, entity_id: str, limit: int = 5) -> tuple[list[EdgeFact], list[TwoHopFact]]:
@@ -113,4 +148,4 @@ def explore(store: GraphStore, entity_id: str, limit: int = 5) -> tuple[list[Edg
     return direct, two_hop[:limit]
 
 
-__all__ = ["EdgeFact", "TwoHopFact", "direct_edges", "find_connection", "explore"]
+__all__ = ["EdgeFact", "TwoHopFact", "ConnectionResult", "direct_edges", "find_all_connections", "explore"]

@@ -10,7 +10,7 @@ checkable as a semantically-retrieved one.
 from __future__ import annotations
 
 from .graph_store import GraphStore
-from .traversal import EdgeFact, TwoHopFact
+from .traversal import ConnectionResult, EdgeFact, TwoHopFact
 
 HEADER = "Known relationships from the communication graph (direct email correspondence):"
 
@@ -39,18 +39,35 @@ def _render_two_hop(store: GraphStore, fact: TwoHopFact) -> str:
     return "\n".join(lines)
 
 
-def render_connection(store: GraphStore, a_id: str, b_id: str, result: EdgeFact | TwoHopFact | None) -> str:
-    """For a two-named-entity query: the specific path between them, or none."""
+def render_connection(store: GraphStore, a_id: str, b_id: str, result: ConnectionResult) -> str:
+    """For a two-named-entity query: every path found between them, shortest marked.
+
+    Reporting every path is cheap (a few extra lines of text); it's only the
+    real document evidence that stays restricted to the shortest one — see
+    ``result.shortest`` and how the graph_rag pipeline uses it.
+    """
     a_name, b_name = store.canonical(a_id), store.canonical(b_id)
-    if result is None:
+    if not result.found:
         return (
             f"{HEADER}\n"
             f"- No connection was found between {a_name} and {b_name} within 2 hops "
             f"of direct correspondence in this corpus."
         )
-    if isinstance(result, EdgeFact):
-        return f"{HEADER}\n{_render_edge(store, result)}"
-    return f"{HEADER}\n{_render_two_hop(store, result)}"
+
+    shortest = result.shortest
+    lines = [HEADER]
+
+    if result.direct:
+        suffix = "  (shortest path — document evidence attached below)" if result.direct is shortest else ""
+        lines.append(_render_edge(store, result.direct) + suffix)
+
+    for path in result.two_hop_paths:
+        block = _render_two_hop(store, path)
+        if path is shortest:
+            block += "  (shortest path — document evidence attached below)"
+        lines.append(block)
+
+    return "\n".join(lines)
 
 
 def render_exploration(store: GraphStore, entity_id: str, direct: list[EdgeFact], two_hop: list[TwoHopFact]) -> str:
